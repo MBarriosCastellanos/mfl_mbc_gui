@@ -11,7 +11,7 @@ import time     # para manejar tiempos y demoras.
 import random   # para generar valores aleatorios.
 import struct
 
-.
+
 #%% ========================================================================
 # Función para generar datos simulados
 # ==========================================================================
@@ -117,12 +117,12 @@ def send_data_to_com_port(port, baudrate=115200):
 #%% ========================================================================
 # Configuración de duración para la recolección de datos
 # ==========================================================================
-duration = 1  # Duración en segundos para la recolección de datos
+#duration = 1  # Duración en segundos para la recolección de datos
 ##
-collected_data = collect_data(duration)   # recolectar datos 
+#collected_data = collect_data(duration)   # recolectar datos 
 #
-print(f"Datos recogidos durante {duration} segundo(s):")
-for data in collected_data:               # Mostrar los datos recolectados
-    #data_print =  struct.unpack(">10Hc2c", data)
-    print(data)               # Imprimir cada dato de la lista recolectada
+#print(f"Datos recogidos durante {duration} segundo(s):")
+#for data in collected_data:               # Mostrar los datos recolectados
+#    #data_print =  struct.unpack(">10Hc2c", data)
+#    print(data)               # Imprimir cada dato de la lista recolectada
 
