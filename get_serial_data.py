@@ -17,7 +17,7 @@ def decode_serial_message(message: bytearray) -> dict:
 
 # Configuración de los puertos seriales
 BAUDRATE = 115200  # Velocidad de comunicación en baudios
-PORTS = ["COM10", "COM11", "COM3"]  # Lista de puertos COM específicos
+port = "COM10"  # Lista de puertos COM específicos
 
 # Tamaño esperado de los mensajes según el formato definido
 MESSAGE_SIZE = struct.calcsize(BIN_MSG_FORMAT) + len(";****".encode())
@@ -32,24 +32,23 @@ csv_writer = csv.writer(csv_file)
 
 # Escribir encabezados en el archivo CSV
 header = [f"S{i:02d}" for i in range(1, 11)] + ["cuerpo"]
-csv_writer.writerow(header * 3)  # Tres grupos de 11 columnas
+csv_writer.writerow(header)  # Tres grupos de 11 columnas
 
 # Intentar abrir todos los puertos seriales
 serial_connections = []
-for port in PORTS:
-    try:
-        comm = serial.Serial(
-            port=port,
-            baudrate=BAUDRATE,  # Velocidad de transmisión
-            parity=serial.PARITY_NONE,  # Sin paridad
-            stopbits=serial.STOPBITS_ONE,  # Un bit de parada
-            bytesize=serial.EIGHTBITS,  # Tamaño del byte: 8 bits
-            timeout=0.1  # Timeout corto para evitar bloqueos
-        )
-        serial_connections.append(comm)
-        print(f"Puerto {port} abierto exitosamente.")
-    except Exception as e:
-        print(f"Error al abrir el puerto {port}: {e}")
+try:
+    comm = serial.Serial(
+        port=port,
+        baudrate=BAUDRATE,  # Velocidad de transmisión
+        parity=serial.PARITY_NONE,  # Sin paridad
+        stopbits=serial.STOPBITS_ONE,  # Un bit de parada
+        bytesize=serial.EIGHTBITS,  # Tamaño del byte: 8 bits
+        timeout=0.1  # Timeout corto para evitar bloqueos
+    )
+    serial_connections.append(comm)
+    print(f"Puerto {port} abierto exitosamente.")
+except Exception as e:
+    print(f"Error al abrir el puerto {port}: {e}")
 
 # Buffer para almacenar datos incompletos de cada puerto
 buffers = [bytearray() for _ in serial_connections]

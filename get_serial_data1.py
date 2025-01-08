@@ -3,82 +3,151 @@ import struct
 import csv
 from datetime import datetime
 
-# Definir el formato del mensaje binario
-BIN_MSG_FORMAT = ">10Hc2c"  # 10 valores enteros sin signo, 1 carácter y 2 caracteres adicionales
+# Formato del mensaje binario
+BIN_MSG_FORMAT = ">10Hc2c"
 
 # Función para decodificar un mensaje serial
-# Desempaqueta el mensaje según el formato definido y lo convierte en un diccionario
 def decode_serial_message(message: bytearray) -> dict:
     value = struct.unpack(BIN_MSG_FORMAT, message)
     return {
-        "values": list(value[0:10]),  # Extrae los primeros 10 valores como lista
-        "status": int(value[12])  # Obtiene el estado como un entero
+        "values": list(value[0:10]),  # Valores de los sensores
+        "status": int(value[12])      # Identificador del cuerpo
     }
 
-# Configuración de los puertos seriales
-BAUDRATE = 115200  # Velocidad de comunicación en baudios
-PORTS = ["COM10", "COM11", "COM3"]  # Lista de puertos COM específicos
+# Configuración de puertos seriales
+BAUDRATE = 115200
+ports = ["COM10", "COM12", "COM3"]
 
-# Tamaño esperado de los mensajes según el formato definido
+# Tamaño esperado del mensaje
 MESSAGE_SIZE = struct.calcsize(BIN_MSG_FORMAT) + len(";****".encode())
 
-# Generar nombre de archivo con la fecha actual
+# Archivo CSV para guardar los datos
 current_date = datetime.now().strftime("%Y-%m-%d")
 csv_filename = f"datos_{current_date}.csv"
-
-# Abrir archivo CSV para guardar los datos
 csv_file = open(csv_filename, mode='w', newline='')
 csv_writer = csv.writer(csv_file)
+header = [f"S{i:02d}_C{j}" for j in range(1, 4) for i in range(1, 11)] + ["ID_C1", "ID_C2", "ID_C3"]
+csv_writer.writerow(header)
 
-# Escribir encabezados en el archivo CSV
-header = [f"S{i:02d}" for i in range(1, 11)] + ["cuerpo"]
-csv_writer.writerow(header * 3)  # Tres grupos de 11 columnas
-
-# Intentar abrir todos los puertos seriales
+# Crear conexiones seriales
 serial_connections = []
-for port in PORTS:
+buffers = {}
+for port in ports:
     try:
         comm = serial.Serial(
             port=port,
-            baudrate=BAUDRATE,  # Velocidad de transmisión
-            parity=serial.PARITY_NONE,  # Sin paridad
-            stopbits=serial.STOPBITS_ONE,  # Un bit de parada
-            bytesize=serial.EIGHTBITS,  # Tamaño del byte: 8 bits
-            timeout=None  # Sin timeout para garantizar lectura continua
+            baudrate=BAUDRATE,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            bytesize=serial.EIGHTBITS,
+            timeout=0.1
         )
         serial_connections.append(comm)
+        buffers[port] = bytearray()
         print(f"Puerto {port} abierto exitosamente.")
     except Exception as e:
         print(f"Error al abrir el puerto {port}: {e}")
 
-# Buffer para almacenar datos incompletos de cada puerto
-buffers = [bytearray() for _ in serial_connections]
+# Paso 1: Identificar qué puerto corresponde a cada cuerpo
+port_to_body = {}
+max_attempts = 10  # Máximo número de intentos por puerto
 
-try:
-    while True:
-        row_data = []
-        for i, comm in enumerate(serial_connections):
-            # Leer un mensaje completo del puerto actual
-            while len(buffers[i]) < MESSAGE_SIZE:
-                data = comm.read(MESSAGE_SIZE - len(buffers[i]))  # Leer solo los bytes necesarios
-                buffers[i].extend(data)  # Añadir los datos leídos al buffer correspondiente
+# Mientras no se hayan identificado los 3 cuerpos
+while len(port_to_body) < 3:
+    for port, comm in zip(ports, serial_connections):
+        # Si el puerto ya ha sido asignado, pasar al siguiente
+        if port in port_to_body.values():
+            continue
 
-            # Extraer un mensaje completo del buffer
-            message = buffers[i][:MESSAGE_SIZE]
-            buffers[i] = buffers[i][MESSAGE_SIZE:]  # Eliminar el mensaje del buffer
+        print(f"Intentando identificar cuerpo para el puerto {port}...")
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                # Leer datos del puerto
+                data = comm.read(comm.in_waiting or MESSAGE_SIZE)
+                buffers[port].extend(data)
 
-            # Decodificar el mensaje y agregarlo a la fila actual
-            decoded_message = decode_serial_message(message)
-            row_data.extend(decoded_message["values"] + [decoded_message["status"]])
+                # Buscar el fin de línea en el buffer
+                end_marker = buffers[port].find(b";****")
+                if end_marker >= 0:
+                    # Extraer un mensaje completo del buffer
+                    message = buffers[port][:end_marker]
+                    buffers[port] = buffers[port][end_marker + len(b";****"):]
+                    
+                    # Verificar el tamaño del mensaje
+                    if len(message) == MESSAGE_SIZE - len(b";****"):
+                        decoded_message = decode_serial_message(message)
+                        body_id = decoded_message["status"]
 
-        # Escribir la fila en el archivo CSV
-        csv_writer.writerow(row_data)
+                        # Asignar puerto al cuerpo y salir del bucle
+                        port_to_body[body_id] = port
+                        print(f"El puerto {port} corresponde al cuerpo {body_id + 1}.")
+                        break
+            except Exception as e:
+                print(f"Error durante la identificación del puerto {port}: {e}")
+            
+            attempts += 1
+        
+        # Si no se pudo identificar el cuerpo, continuar con el siguiente puerto
+        if attempts == max_attempts and port not in port_to_body.values():
+            print(f"No se pudo identificar un cuerpo para el puerto {port} después de {max_attempts} intentos.")
 
-except KeyboardInterrupt:
-    pass  # Permite salir del bucle con Ctrl+C
+    # Salir del bucle principal si todos los cuerpos han sido identificados
+    if len(port_to_body) == 3:
+        print("Todos los cuerpos han sido identificados correctamente.")
+        break
 
-# Cerrar los puertos seriales y el archivo CSV
-for comm in serial_connections:
-    comm.close()
-csv_file.close()
-print("Todos los puertos cerrados y datos guardados correctamente.")
+# Verificar que se han identificado todos los cuerpos
+if len(port_to_body) < 3:
+    print("No se pudieron identificar todos los puertos. Verifica las conexiones y vuelve a intentarlo.")
+    exit(1)  # Salir del programa si no se identificaron todos los cuerpos correctamente
+
+
+
+ports = [port_to_body[i] for i in sorted(port_to_body.keys())]
+print("Puertos identificados:", ports)
+
+## Crear buffers provisionales para cada cuerpo
+#buffer_provisional = {1: [], 2: [], 3: []}
+#
+#try:
+#    while True:
+#        for port, comm in zip(ports, serial_connections):
+#            # Leer datos del puerto actual
+#            data = comm.read(comm.in_waiting or 1)
+#            buffers[port].extend(data)
+#
+#            # Buscar el fin de línea en el buffer
+#            end_marker = buffers[port].find(b";****")
+#            if end_marker >= 0:
+#                # Extraer un mensaje completo del buffer
+#                message = buffers[port][:end_marker]
+#                buffers[port] = buffers[port][end_marker + len(b";****"):]
+#
+#                # Verificar el tamaño del mensaje
+#                if len(message) == MESSAGE_SIZE - len(b";****"):
+#                    decoded_message = decode_serial_message(message)
+#                    body_id = decoded_message["status"]
+#                    buffer_provisional[body_id].append(decoded_message["values"])
+#
+#                # Transferir al buffer maestro si los tres cuerpos tienen datos
+#                if all(len(buffer_provisional[body]) >= 100 for body in buffer_provisional):
+#                    # Concatenar datos en el buffer maestro en orden
+#                    buffer_master = []
+#                    for body_id in range(1, 4):  # Orden 1, 2, 3
+#                        buffer_master.extend(buffer_provisional[body_id])
+#                        buffer_provisional[body_id] = []  # Vaciar el buffer provisional
+#
+#                    # Escribir datos al archivo CSV
+#                    for row in buffer_master:
+#                        csv_writer.writerow(row)
+#
+#except KeyboardInterrupt:
+#    pass  # Permitir salir del bucle con Ctrl+C
+#
+## Cerrar puertos y archivo
+#for comm in serial_connections:
+#    comm.close()
+#csv_file.close()
+#print("Todos los puertos cerrados y datos guardados correctamente.")
+#

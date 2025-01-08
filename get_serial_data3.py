@@ -18,7 +18,7 @@ def decode_serial_message(message: bytearray) -> dict:
 
 # Configuración de los puertos seriales
 BAUDRATE = 115200
-PORTS = ["COM10", "COM11", "COM3"]
+PORTS = ["COM10", "COM12", "COM3"]
 
 # Tamaño esperado de los mensajes
 MESSAGE_SIZE = struct.calcsize(BIN_MSG_FORMAT) + len(";****".encode())
