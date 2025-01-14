@@ -2,6 +2,7 @@ import serial
 import struct
 import csv
 from datetime import datetime
+import numpy as np
 
 # Formato del mensaje binario
 BIN_MSG_FORMAT = ">10Hc2c"
@@ -87,6 +88,7 @@ while len(port_to_body) < 3:
                         # Asignar puerto al cuerpo y salir del bucle
                         port_to_body[body_id] = port
                         print(f"El puerto {port} corresponde al cuerpo {body_id + 1}.")
+                        comm.close()
                         break
             except Exception as e:
                 print(f"Error durante la identificación del puerto {port}: {e}")
@@ -112,8 +114,8 @@ if len(port_to_body) < 3:
 ports = [port_to_body[i] for i in sorted(port_to_body.keys())]
 print("Puertos identificados:", ports)
 
-for comm in serial_connections:
-    comm.close()
+#for comm in serial_connections:
+#    comm.close()
 
 serial_connections, buffers = get_serial_coneccions_buffers(ports)
 
@@ -121,40 +123,45 @@ serial_connections, buffers = get_serial_coneccions_buffers(ports)
 # Crear buffers provisionales para cada cuerpo
 buffer_provisional = {1: [], 2: [], 3: []}
 
-#try:
-#    while True:
-#        for port, comm in zip(ports, serial_connections):
-#            # Leer datos del puerto actual
-#            data = comm.read(comm.in_waiting or 1)
-#            buffers[port].extend(data)
+try:
+    while True:
+        for port, comm in zip(ports, serial_connections):
+            # Leer datos del puerto actual
+            data = comm.read(comm.in_waiting or 1)
+            buffers[port].extend(data)
+
+            # Buscar el fin de línea en el buffer
+            end_marker = buffers[port].find(b";****")
+            if end_marker >= 0:
+                # Extraer un mensaje completo del buffer
+                message = buffers[port][:end_marker]
+                buffers[port] = buffers[port][end_marker + len(b";****"):]
+
+                # Verificar el tamaño del mensaje
+                if len(message) == MESSAGE_SIZE - len(b";****"):
+                    decoded_message = decode_serial_message(message)
+                    body_id = decoded_message["status"]
+                    buffer_provisional[body_id + 1].append(decoded_message["values"])
+
+                # Transferir al buffer maestro si los tres cuerpos tienen datos
+                if all(len(buffer_provisional[body]) >= 100 for body in buffer_provisional):
+                    # Concatenar datos en el buffer maestro en orden
+                    print("Datos completos para los cuerpos 1, 2 y 3.")
+                    print(np.array(buffer_provisional[1]).shape)
+                    print(np.array(buffer_provisional[2]).shape)
+                    print(np.array(buffer_provisional[3]).shape)
+
+                    buffer_master = []
+                    for body_id in range(1, 4):  # Orden 1, 2, 3
+                        buffer_master.extend(buffer_provisional[body_id])
+                        buffer_provisional[body_id] = []  # Vaciar el buffer provisional
+
+                    # Escribir datos al archivo CSV
+                    for row in buffer_master:
+                        csv_writer.writerow(row)
 #
-#            # Buscar el fin de línea en el buffer
-#            end_marker = buffers[port].find(b";****")
-#            if end_marker >= 0:
-#                # Extraer un mensaje completo del buffer
-#                message = buffers[port][:end_marker]
-#                buffers[port] = buffers[port][end_marker + len(b";****"):]
-#
-#                # Verificar el tamaño del mensaje
-#                if len(message) == MESSAGE_SIZE - len(b";****"):
-#                    decoded_message = decode_serial_message(message)
-#                    body_id = decoded_message["status"]
-#                    buffer_provisional[body_id].append(decoded_message["values"])
-#
-#                # Transferir al buffer maestro si los tres cuerpos tienen datos
-#                if all(len(buffer_provisional[body]) >= 100 for body in buffer_provisional):
-#                    # Concatenar datos en el buffer maestro en orden
-#                    buffer_master = []
-#                    for body_id in range(1, 4):  # Orden 1, 2, 3
-#                        buffer_master.extend(buffer_provisional[body_id])
-#                        buffer_provisional[body_id] = []  # Vaciar el buffer provisional
-#
-#                    # Escribir datos al archivo CSV
-#                    for row in buffer_master:
-#                        csv_writer.writerow(row)
-#
-#except KeyboardInterrupt:
-#    pass  # Permitir salir del bucle con Ctrl+C
+except KeyboardInterrupt:
+    pass  # Permitir salir del bucle con Ctrl+C
 #
 ## Cerrar puertos y archivo
 #for comm in serial_connections:
