@@ -16,10 +16,31 @@ def decode_serial_message(message: bytearray) -> dict:
 
 # Configuración de puertos seriales
 BAUDRATE = 115200
-ports = ["COM10", "COM12", "COM3"]
+ports = ["COM12", "COM10", "COM3"]
 
 # Tamaño esperado del mensaje
 MESSAGE_SIZE = struct.calcsize(BIN_MSG_FORMAT) + len(";****".encode())
+
+# functions
+def get_serial_coneccions_buffers(ports): # Crear conexiones seriales
+    serial_connections = []
+    buffers = {}
+    for port in ports:
+        try:
+            comm = serial.Serial(
+                port=port,
+                baudrate=BAUDRATE,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                bytesize=serial.EIGHTBITS,
+                timeout=0.1
+            )
+            serial_connections.append(comm)
+            buffers[port] = bytearray()
+            print(f"Puerto {port} abierto exitosamente.")
+        except Exception as e:
+            print(f"Error al abrir el puerto {port}: {e}")
+    return serial_connections, buffers
 
 # Archivo CSV para guardar los datos
 current_date = datetime.now().strftime("%Y-%m-%d")
@@ -29,24 +50,8 @@ csv_writer = csv.writer(csv_file)
 header = [f"S{i:02d}_C{j}" for j in range(1, 4) for i in range(1, 11)] + ["ID_C1", "ID_C2", "ID_C3"]
 csv_writer.writerow(header)
 
-# Crear conexiones seriales
-serial_connections = []
-buffers = {}
-for port in ports:
-    try:
-        comm = serial.Serial(
-            port=port,
-            baudrate=BAUDRATE,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            bytesize=serial.EIGHTBITS,
-            timeout=0.1
-        )
-        serial_connections.append(comm)
-        buffers[port] = bytearray()
-        print(f"Puerto {port} abierto exitosamente.")
-    except Exception as e:
-        print(f"Error al abrir el puerto {port}: {e}")
+# Paso 0: Crear conexiones seriales
+serial_connections, buffers = get_serial_coneccions_buffers(ports)
 
 # Paso 1: Identificar qué puerto corresponde a cada cuerpo
 port_to_body = {}
@@ -107,9 +112,15 @@ if len(port_to_body) < 3:
 ports = [port_to_body[i] for i in sorted(port_to_body.keys())]
 print("Puertos identificados:", ports)
 
-## Crear buffers provisionales para cada cuerpo
-#buffer_provisional = {1: [], 2: [], 3: []}
-#
+for comm in serial_connections:
+    comm.close()
+
+serial_connections, buffers = get_serial_coneccions_buffers(ports)
+
+
+# Crear buffers provisionales para cada cuerpo
+buffer_provisional = {1: [], 2: [], 3: []}
+
 #try:
 #    while True:
 #        for port, comm in zip(ports, serial_connections):
