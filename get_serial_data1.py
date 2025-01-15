@@ -1,27 +1,29 @@
+#%% Importar librerías
 import serial
 import struct
 import csv
 from datetime import datetime
 import numpy as np
 from serial.tools import list_ports
+import time
+import matplotlib.pyplot as plt
 
-# Formato del mensaje binario
-BIN_MSG_FORMAT = ">10Hc2c"
+#%% Definir constantes
+start_time = time.time()
+BIN_MSG_FORMAT = ">10Hc2c"      # Formato de los datos en binario
+BAUDRATE = 115200               # Velocidad de transmisión 
+MESSAGE_SIZE = struct.calcsize( # Tamaño de los mensajes seriales
+    BIN_MSG_FORMAT) + len(";****".encode())
+save = True                     # Guardar datos en un archivo CSV
+plot = True                     # Mostrar gráficos en tiempo real
 
-# Función para decodificar un mensaje serial
+#%% Definir funciones
 def decode_serial_message(message: bytearray) -> dict:
     value = struct.unpack(BIN_MSG_FORMAT, message)
     return {
         "values": list(value[0:10]),  # Valores de los sensores
         "status": int(value[12])      # Identificador del cuerpo
     }
-
-# Configuración de puertos seriales
-BAUDRATE = 115200
-
-# Tamaño esperado del mensaje
-MESSAGE_SIZE = struct.calcsize(BIN_MSG_FORMAT) + len(";****".encode())
-
 # functions
 def get_serial_coneccions_buffers(ports): # Crear conexiones seriales
     serial_connections = []
@@ -42,7 +44,6 @@ def get_serial_coneccions_buffers(ports): # Crear conexiones seriales
         except Exception as e:
             print(f"Error al abrir el puerto {port}: {e}")
     return serial_connections, buffers
-
 
 def identify_com_connections():
     ports = list_ports.comports()
@@ -108,22 +109,31 @@ def identify_com_connections():
     print("Puertos identificados:", ports)
     return ports
 
-# Archivo CSV para guardar los datos
+#%% Archivo CSV para guardar los datos
 current_date = datetime.now().strftime("%Y-%m-%d")
 csv_filename = f"datos_{current_date}.csv"
-csv_file = open(csv_filename, mode='w', newline='')
-csv_writer = csv.writer(csv_file)
-header = [f"S{i:02d}_C{j}" for j in range(1, 4) for i in range(1, 11)] + ["ID_C1", "ID_C2", "ID_C3"]
-csv_writer.writerow(header)
 
-# Paso 1: Identificar qué puerto corresponde a cada cuerpo
+
+#%% Paso 1: Identificar qué puerto corresponde a cada cuerpo
 ports = identify_com_connections()
 
+#%% Paso 2: Leer datos de los puertos seriales
 serial_connections, buffers = get_serial_coneccions_buffers(ports)
 
-
-# Crear buffers provisionales para cada cuerpo
-buffer_provisional = {1: [], 2: [], 3: []}
+# Crear buffers 
+buffer_acquisition = {1: [], 2: [], 3: []}
+buffer_plot = {1: np.empty((0, 10)), 2: np.empty((0, 10)), 3: np.empty((0, 10))}
+iterations = 0
+plot_refresh = 100
+plot_samples = 1500
+header = [f"S{i:02d}_C{j}" for j in range(1, 4) for i in range(1, 11)] # Encabezado del archivo CSV
+if plot:
+    fig, axs = plt.subplots(3, 1, figsize=(10, 10))
+    for i, ax in enumerate(axs):
+        ax.set_ylabel(f"Cuerpo {i + 1}")
+        ax.set_xlabel("time")
+        ax.set_ylim(0, 10)
+        ax.grid()
 
 try:
     while True:
@@ -148,66 +158,60 @@ try:
             if len(message1) == MESSAGE_SIZE - len(b";****"):
                 decoded_message1 = decode_serial_message(message1)
                 body_id1 = decoded_message1["status"]
-                buffer_provisional[body_id1 + 1].append(decoded_message1["values"])
+                buffer_acquisition[body_id1 + 1].append(decoded_message1["values"])
         if end_marker2>=0:
             message2 = buffers[ports[1]][:end_marker2]
             buffers[ports[1]] = buffers[ports[1]][end_marker2 + len(b";****"):]
             if len(message2) == MESSAGE_SIZE - len(b";****"):
                 decoded_message2 = decode_serial_message(message2)
                 body_id2 = decoded_message2["status"]
-                buffer_provisional[body_id2 + 1].append(decoded_message2["values"])
+                buffer_acquisition[body_id2 + 1].append(decoded_message2["values"])
         if end_marker3>=0:
             message3 = buffers[ports[2]][:end_marker3]
             buffers[ports[2]] = buffers[ports[2]][end_marker3 + len(b";****"):]
             if len(message3) == MESSAGE_SIZE - len(b";****"):
                 decoded_message3 = decode_serial_message(message3)
                 body_id3 = decoded_message3["status"]
-                buffer_provisional[body_id3 + 1].append(decoded_message3["values"])
+                buffer_acquisition[body_id3 + 1].append(decoded_message3["values"])
+        iterations += 1
 
-        print(len(buffer_provisional[1]), len(buffer_provisional[2]), len(buffer_provisional[3]))
-        
 
-        #for port, comm in zip(ports, serial_connections):
-        #    # Leer datos del puerto actual
-        #    data = comm.read(comm.in_waiting or 1)
-        #    buffers[port].extend(data)
-#
-        #    # Buscar el fin de línea en el buffer
-        #    end_marker = buffers[port].find(b";****")
-        #    if end_marker >= 0:
-        #        # Extraer un mensaje completo del buffer
-        #        message = buffers[port][:end_marker]
-        #        buffers[port] = buffers[port][end_marker + len(b";****"):]
-#
-        #        # Verificar el tamaño del mensaje
-        #        if len(message) == MESSAGE_SIZE - len(b";****"):
-        #            decoded_message = decode_serial_message(message)
-        #            body_id = decoded_message["status"]
-        #            buffer_provisional[body_id + 1].append(decoded_message["values"])
-#
-        #        # Transferir al buffer maestro si los tres cuerpos tienen datos
-        #        if all(len(buffer_provisional[body]) >= 100 for body in buffer_provisional):
-        #            # Concatenar datos en el buffer maestro en orden
-        #            print("Datos completos para los cuerpos 1, 2 y 3.")
-        #            print(np.array(buffer_provisional[1]).shape)
-        #            print(np.array(buffer_provisional[2]).shape)
-        #            print(np.array(buffer_provisional[3]).shape)
-#
-        #            buffer_master = []
-        #            for body_id in range(1, 4):  # Orden 1, 2, 3
-        #                buffer_master.extend(buffer_provisional[body_id])
-        #                buffer_provisional[body_id] = []  # Vaciar el buffer provisional
-#
-        #            # Escribir datos al archivo CSV
-        #            for row in buffer_master:
-        #                csv_writer.writerow(row)
-#
+        if plot and iterations % plot_refresh == 0 and iterations > 1200:
+            buffer_plot[1] = np.vstack((buffer_plot[1], np.array(buffer_acquisition[1][-plot_refresh:])))
+            buffer_plot[2] = np.vstack((buffer_plot[2], np.array(buffer_acquisition[2][-plot_refresh:])))
+            buffer_plot[3] = np.vstack((buffer_plot[3], np.array(buffer_acquisition[3][-plot_refresh:])))
+
+            for i, ax in enumerate(axs):
+                ax.clear()
+                t = np.arange(buffer_plot[i + 1].shape[0])/300
+                ax.plot(buffer_plot[i + 1])
+                ax.set_ylabel(f"Cuerpo {i + 1}")
+                ax.set_xlabel("time")
+                #ax.set_ylim(0, 10)
+                ax.grid()
+            plt.pause(0.01)
+            if len(buffer_plot[1]) > (plot_samples - plot_refresh):
+                buffer_plot[1] = buffer_plot[1][-(plot_samples - plot_refresh):]
+                buffer_plot[2] = buffer_plot[2][-(plot_samples - plot_refresh):]
+                buffer_plot[3] = buffer_plot[3][-(plot_samples - plot_refresh):]
+
+        if len(buffer_acquisition[1]) >=300 and len(buffer_acquisition[2]) >=300 and len(buffer_acquisition[3]) >=300:
+            if save:
+                buffer_body1 = np.array(buffer_acquisition[1])
+                buffer_body2 = np.array(buffer_acquisition[2])
+                buffer_body3 = np.array(buffer_acquisition[3])
+                buffer_save = np.c_[buffer_body1[:300, :], buffer_body2[:300, :], buffer_body3[:300, :],]
+                with open(csv_filename, mode='a', newline='') as csv_file:
+                    if csv_file.tell() == 0:
+                        csv_writer = csv.writer(csv_file)
+                        csv_writer.writerow(header)
+                    csv_writer = csv.writer(csv_file)
+                    csv_writer.writerows(buffer_save)
+                del buffer_save, buffer_body1, buffer_body2, buffer_body3
+                print("Datos guardados en el archivo CSV.")
+                print("elapsed time : %.4f" % (time.time() - start_time))
+                print("len 1 : {}, len 2 : {}, len 3 : {}".format(len(buffer_acquisition[1]), len(buffer_acquisition[2]), len(buffer_acquisition[3])))
+            buffer_acquisition = {1: [], 2: [], 3: []}
+
 except KeyboardInterrupt:
     pass  # Permitir salir del bucle con Ctrl+C
-#
-## Cerrar puertos y archivo
-#for comm in serial_connections:
-#    comm.close()
-#csv_file.close()
-#print("Todos los puertos cerrados y datos guardados correctamente.")
-#
