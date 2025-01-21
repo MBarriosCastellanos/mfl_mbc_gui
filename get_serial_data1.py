@@ -7,6 +7,8 @@ import numpy as np
 from serial.tools import list_ports
 import time
 import matplotlib.pyplot as plt
+import subprocess
+import os
 
 #%% Definir constantes
 start_time = time.time()
@@ -18,6 +20,28 @@ save = True                     # Guardar datos en un archivo CSV
 plot = True                     # Mostrar gráficos en tiempo real
 
 #%% Definir funciones
+def close_applications_using_port(port):
+    """Cierra cualquier aplicación que esté utilizando el puerto serial."""
+    try:
+        if os.name == 'nt':  # Para Windows
+            # Usa `handle.exe` para encontrar y cerrar aplicaciones
+            result = subprocess.check_output(["handle.exe", port], universal_newlines=True)
+            lines = result.split("\n")
+            for line in lines:
+                if "pid:" in line.lower():
+                    pid = line.split("pid:")[1].split()[0]
+                    subprocess.call(["taskkill", "/F", "/PID", pid])
+        else:  # Para Linux/macOS
+            # Usa `lsof` para encontrar y cerrar aplicaciones
+            result = subprocess.check_output(["lsof", "|", "grep", port], universal_newlines=True, shell=True)
+            lines = result.split("\n")
+            for line in lines:
+                pid = line.split()[1]
+                subprocess.call(["kill", "-9", pid])
+        print(f"Se cerraron las aplicaciones que utilizaban el puerto {port}.")
+    except Exception as e:
+        print(f"No se pudo cerrar las aplicaciones del puerto {port}: {e}")
+
 def decode_serial_message(message: bytearray) -> dict:
     value = struct.unpack(BIN_MSG_FORMAT, message)
     return {
@@ -56,7 +80,7 @@ def identify_com_connections():
 
     # Paso 1: Identificar qué puerto corresponde a cada cuerpo
     port_to_body = {}
-    max_attempts = 10  # Máximo número de intentos por puerto
+    max_attempts = 50  # Máximo número de intentos por puerto
 
     # Mientras no se hayan identificado los 3 cuerpos
     while len(port_to_body) < 3:
@@ -92,7 +116,7 @@ def identify_com_connections():
                             break
                 except Exception as e:
                     print(f"Error durante la identificación del puerto {port}: {e}")
-
+               
                 attempts += 1
 
             # Si no se pudo identificar el cuerpo, continuar con el siguiente puerto
