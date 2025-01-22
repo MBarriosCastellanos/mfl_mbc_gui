@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import subprocess
 import os
 import multiprocessing
+from multiprocessing import Pool, Manager
 
 #%% Definir constantes
 start_time = time.time()
@@ -30,7 +31,7 @@ class DataAdquisition:
 
     self.identify_comm_mfl()
     self.identify_comm_mfl()
-
+    self.publish_data()
 
   def decode_serial_message(self, message):
     value = struct.unpack(                  # Decodificar mensaje
@@ -64,19 +65,16 @@ class DataAdquisition:
       comm.close()
       print(f"Puerto {comm.port} cerrado exitosamente.")
 
-  def read_serial_data(self, comm, buffer):
+  def read_port_data(self, comm, buffer):
     data = comm.read(comm.in_waiting or self.msm_size) # Leer datos
     buffer.extend(data)                     # Agregar datos al buffer
     end = buffer.find(b";****")             # Buscar fin de línea
+    values, body = None, None
     if end >= 0:                            # Si se encontró el fin de línea
       message = buffer[:end]                # Extraer mensaje
       buffer = buffer[end + len(b";****"):] # Actualizar buffer
       if len(message) == self.msm_size - len(b";****"): # Verificar tamaño del mensaje
         values, body = self.decode_serial_message(message) # Decodificar mensaje
-      else:
-        values, body = None, None
-    else:
-      values, body = None, None 
     return buffer, values, body
 
   def identify_comm_mfl(self):
@@ -94,7 +92,7 @@ class DataAdquisition:
         attempts = 0
         buffer = bytearray()
         while attempts < max_attempts:
-          buffer, _ , body = self.read_serial_data(comm, buffer)
+          buffer, _ , body = self.read_port_data(comm, buffer)
           if body is not None:
             port_to_body[body] = port
             print(f"El puerto {port} corresponde al cuerpo {body + 1}")
@@ -108,22 +106,28 @@ class DataAdquisition:
 
   def publish_data(self):
     self.open_serial_ports()
-    buffers = [bytearray() for _ in self.serial_connections]
-    buffer_acquisition = {0: [], 1: [], 2: []}
+    n_ports = len(self.ports)
+    buffers = [bytearray() for _ in range(n_ports)]
+    buffer_acquisition = {i: [] for i in range(n_ports)}
     iterations = 0
-
     try:
       while True:
-        for i, comm  in enumerate(self.serial_connections):
-          buffers[i], values, body = self.read_serial_data(comm, buffers[i])
+        for i in range(n_ports):
+          buffers[i], values, body = self.read_port_data(
+            self.serial_connections[i], 
+            buffers[i]
+            )
           if body is not None and iterations>600:
             buffer_acquisition[body].append(values)
         iterations +=1
-        if iterations % 300 == 0:
+        if all(len(lst) >= 300 for lst in buffer_acquisition.values()):
           print("elapsed time : %.4f =================" % (time.time() - start_time))
-          for i in buffer_acquisition:
-            size = np.shape(np.array(buffer_acquisition[i]))
+          for i, data in buffer_acquisition.items():
+            size = len(data)  # Obtiene directamente la longitud de la lista
             print(f"Se leyeron {size} datos del cuerpo {i}")
+          buffer_acquisition = {i: [] for i in range(n_ports)}
+
+          
     except KeyboardInterrupt:
       self.close_serial_ports()
       print(f"Se leyeron {iterations} iteraciones de datos.")
