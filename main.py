@@ -115,37 +115,24 @@ class DataAdquisition:
     n_ports = len(self.ports)
     buffer_acquisition = {i: [] for i in range(n_ports)}
     iterations = 0
-    target_frequency = 350  # Frecuencia en Hz
-    target_period = 1 / target_frequency  # Período objetivo en segundos
+    print_iteration = 0
+    while True:
+      start_time_bucle = time.time()
+      for i in range(n_ports):
+        values, body = self.read_port_data(i)
+        if body is not None and iterations:
+          buffer_acquisition[body].append(values)
+          
+      iterations +=1
+      if all(len(lst) >= 300 for lst in buffer_acquisition.values()):
+        print("elapsed time : %.4f, Iterations %s =================" % (
+          (time.time() - start_time), iterations- print_iteration))
+        print_iteration = iterations
+        for j, data in buffer_acquisition.items():
+          buffer_acquisition[j] = buffer_acquisition[j][300:]
+          print(f"para el cuerpot {j} el tamaño es {len(data)}")
+            
 
-    try:
-      while True:
-        start_time_bucle = time.time()
-        #results = map(self.read_port_data, range(n_ports))
-        #for values, body in results:
-        for i in range(n_ports):
-          values, body = self.read_port_data(i)
-          if body is not None:
-            buffer_acquisition[body].append(values)
-        iterations +=1
-        if all(len(lst) >= 300 for lst in buffer_acquisition.values()):
-          print("elapsed time : %.4f, Iterations %s =================" % (
-            (time.time() - start_time), iterations))
-          for i, data in buffer_acquisition.items():
-            size = len(data)  # Obtiene directamente la longitud de la lista
-            print(f"Se leyeron {size} datos del cuerpo {i}")
-          buffer_acquisition = {i: [] for i in range(n_ports)}
-          iterations = 0
-        # Control del tiempo para mantener la frecuencia de 300 Hz
-        elapsed_time_bucle = time.time() - start_time_bucle  # Tiempo transcurrido en esta iteración
-        remaining_time = target_period - elapsed_time_bucle
-        if remaining_time > 0:
-            time.sleep(remaining_time)  # Espera el tiempo necesario para mantener 300 Hz
-        
-    except KeyboardInterrupt:
-      self.close_serial_ports()
-      print(f"Se leyeron {iterations} iteraciones de datos.")
-      pass
 
 if __name__ == "__main__":
   adquisition = DataAdquisition()
