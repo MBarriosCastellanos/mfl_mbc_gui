@@ -6,17 +6,12 @@ from datetime import datetime
 import numpy as np
 from serial.tools import list_ports
 import time
-import matplotlib.pyplot as plt
-import subprocess
-import os
-import multiprocessing
-from multiprocessing import Pool, Manager
+
 
 #%% Definir constantes
 start_time = time.time()
 save = True                     # Guardar datos en un archivo CSV
 plot = True                     # Mostrar gráficos en tiempo real
-
 
 #%% Adquisición de datos
 class DataAdquisition:
@@ -114,46 +109,27 @@ class DataAdquisition:
     self.open_serial_ports()
     n_ports = len(self.ports)
     buffer_acquisition = {i: [] for i in range(n_ports)}
-    iterations = 0
-    print_iteration = 0
+    #iterations = 0
+    #print_iteration = 0
+    self.buffer_publish = {i: [] for i in range(n_ports)}
     while True:
       start_time_bucle = time.time()
       for i in range(n_ports):
         values, body = self.read_port_data(i)
-        if body is not None and iterations:
+        if body is not None :
           buffer_acquisition[body].append(values)
           
-      iterations +=1
+      #iterations +=1
       if all(len(lst) >= 300 for lst in buffer_acquisition.values()):
-        print("elapsed time : %.4f, Iterations %s =================" % (
-          (time.time() - start_time), iterations- print_iteration))
-        print_iteration = iterations
+        #print("elapsed time : %.4f, Iterations %s =================" % (
+        #  (time.time() - start_time), iterations- print_iteration))
+        #print_iteration = iterations
         for j, data in buffer_acquisition.items():
-          buffer_acquisition[j] = buffer_acquisition[j][300:]
-          print(f"para el cuerpot {j} el tamaño es {len(data)}")
+          self.buffer_publish[j] = data[:300]
+          buffer_acquisition[j] = data[300:]
+          #print(f"para el cuerpot {j} el tamaño es {len(data)}")
             
-
-
 if __name__ == "__main__":
   adquisition = DataAdquisition()
 
 
-
-  #acquisition_queue = multiprocessing.Queue()
-  #save_queue = multiprocessing.Queue()
-
-  #data_acquisition = DataAcquisition(acquisition_queue)
-  #data_saver = DataSaver(save_queue)
-  #data_plotter = DataPlotter(acquisition_queue)
-  #
-  #acquisition_process = multiprocessing.Process(target=data_acquisition.start)
-  #saver_process = multiprocessing.Process(target=data_saver.start)
-  #plotter_process = multiprocessing.Process(target=data_plotter.start)
-  #
-  #acquisition_process.start()
-  #saver_process.start()
-  #plotter_process.start()
-  #
-  #acquisition_process.join()
-  #saver_process.join()
-  #plotter_process.join()
