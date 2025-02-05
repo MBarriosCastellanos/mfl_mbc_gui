@@ -6,13 +6,17 @@ from datetime import datetime
 import numpy as np
 from serial.tools import list_ports
 import time
-import threading
-import queue
+import threading                  # Hilos de ejecución
+import queue                      # Cola de datos
+import matplotlib.pyplot as plt    # Gráficos
+from matplotlib.animation import FuncAnimation
 
 #%% Definir constantes
 start_time = time.time()
 save = True                     # Guardar datos en un archivo CSV
 plot = True                     # Mostrar gráficos en tiempo real
+
+#%%
 
 #%% Adquisición de datos
 class DataAdquisition:
@@ -21,15 +25,24 @@ class DataAdquisition:
     self.baudrate = 115200                  # Velocidad de transmisión
     self.msm_size = struct.calcsize(        # Tamaño del mensaje
       self.bin_msm_format) + len(";****".encode())
-    self.ports = [                      # Puertos seriales disponibles           
+
+    # Identificación de los puertos seriales
+    self.ports = [                                
       port.device for port in list_ports.comports()]
-    self.data_queue = queue.Queue()         # Cola de datos
+
+    # 
+    self.data_queue_plot = queue.Queue()         # Cola de datos
+    self.data_queue_save = queue.Queue()         # Cola de datos
     self.running = False                    # Bandera de ejecución
     self.thread = None                      # Hilo de ejecución
+
     self.buffer_publish = {}                # Buffer de datos a publicar
 
+    
+    self.save_active = False  # Bandera para indicar si el guardado está activo
+    self.plot_active = False  # Bandera para indicar si el guardado está activo
+
     self.identify_comm_mfl()
-    #self.identify_comm_mfl()
     self.start()
 
   def start(self):
@@ -43,6 +56,14 @@ class DataAdquisition:
     if self.thread is not None:             # Si el hilo existe
       self.thread.join()                    # Esperar a que termine
     self.close_serial_ports()               # Cerrar puertos seriales
+
+  def set_save_active(self, active):
+    self.save_active = active
+    print(f"Guardado activo: {active}")  
+
+  def set_plot_active(self, active):
+    self.plot_active = active
+    print(f"Plotado activo: {active}")  
 
   def decode_serial_message(self, message):
     value = struct.unpack(                  # Decodificar mensaje
@@ -134,9 +155,13 @@ class DataAdquisition:
         values, body = self.read_port_data(i)
         if body is not None :
           buffer_acquisition[body].append(values)
+
+      min_len = min(len(lst) for lst in buffer_acquisition.values())
+      if min_len % 10 == 0 and min_len >= 10 and self.plot_active:
+        self.data_queue_plot.put(buffer_acquisition)
           
       iterations +=1
-      if all(len(lst) >= 300 for lst in buffer_acquisition.values()):
+      if min_len >= 300:
         print("elapsed time : %.4f, Iterations %s =================" % (
           (time.time() - start_time), iterations- print_iteration))
         print_iteration = iterations
@@ -144,27 +169,28 @@ class DataAdquisition:
           self.buffer_publish[j] = data[:300]
           buffer_acquisition[j] = data[300:]
           print(f"para el cuerpo {j} el tamaño es {len(data)}")
-        self.data_queue.put(self.buffer_publish)
+        if self.save_active:
+          self.data_queue_save.put(self.buffer_publish)
+
 class DataSaver:
   def __init__(self, data_adquisition):
     self.data_adquisition = data_adquisition            # Adquisición de datos
     self.running = False                                # Bandera de ejecución
-    self.csv_file = None                                # Archivo CSV
     self.writer = None                        # Escritor de archivo CSV
     self.thread = None                        # Hilo de ejecución
     self.header_written = False               # Bandera de encabezado escrito
     self.thread = threading.Thread(                     # Hilo de ejecución
       target=self.run)
+
   def start(self):
     self.running = True                       # Iniciar ejecución
+    self.data_adquisition.set_save_active(True)  # Activar guardado
     self.thread.start()                       # Iniciar hilo de ejecución
     print("DataSaver iniciado.")
 
   def stop(self):
     self.running = False                      # Detener ejecución
     self.thread.join()                        # Esperar a que termine
-    if self.csv_file is not None:             # Si el archivo existe
-      self.close_csv.close()                  # Cerrar archivo CSV
     print("DataSaver detenido.")
 
   def create_csv_file(self, num_bodies):
@@ -182,10 +208,10 @@ class DataSaver:
     self.header_written = True           # Bandera de encabezado escrito
 
   def run(self):
-    num_bodies = None
     while self.running:
       try:
-        data = self.data_adquisition.data_queue.get(timeout=0.1)
+        # Adquirir datos de la cola un tiempo de espera de 0.5 segundos
+        data = self.data_adquisition.data_queue_save.get(timeout=0.5)
 
         if not self.header_written:
           num_bodies = len(data)            # Número de cuerpos
@@ -212,19 +238,112 @@ class DataSaver:
 
       except queue.Empty:
         continue
-        
+
+class DataPlot:
+  def __init__(self, data_adquisition):
+    self.data_adquisition = data_adquisition            # Adquisición de datos
+    self.running = False                                # Bandera de ejecución
+    self.writer = None                        # Escritor de archivo CSV
+    self.thread = None                        # Hilo de ejecución
+    self.header_written = False               # Bandera de encabezado escrito
+    self.thread = threading.Thread(                     # Hilo de ejecución
+      target=self.run)
+    self.csv_file = None                                # Archivo CSV
+    self.data = None                                    # Datos
+
+    # Configuración de la figura y líneas
+    self.fig, self.ax = plt.subplots(3, 1, figsize=(10, 10))
+    self.lines = []
+    
+    # Crear 10 líneas por cada subplot (una por sensor)
+    for i in range(3):
+      body_lines = [self.ax[i].plot([], [], lw=1)[0] for _ in range(10)]
+      self.lines.append(body_lines)
+      self.ax[i].set_title(f"Body {i+1}")
+      #self.ax[i].set_xlim(0, 3000)
+      #self.ax[i].set_ylim(0, 1024)  # Ajusta según tu rango de datos
+    
+    # Animación
+    self.ani = FuncAnimation(
+        self.fig, 
+        self.update_plot, 
+        interval=100, 
+        blit=True, 
+        cache_frame_data=False
+    )
+
+  def start(self):
+    self.running = True                       # Iniciar ejecución
+    self.data_adquisition.set_plot_active(True)  # Activar guardado
+    self.thread.start()                       # Iniciar hilo de ejecución
+    print("DataPlot iniciado.")
+    plt.show()  # Mostrar la ventana en el hilo principal
+
+  def stop(self):
+    self.running = False                      # Detener ejecución
+    self.thread.join()                        # Esperar a que termine
+    if self.csv_file is not None:             # Si el archivo existe
+      self.close_csv.close()                  # Cerrar archivo CSV
+    print("DataPlot detenido.")
+
+  def run(self):
+    while self.running:
+      try:
+        # Adquirir datos de la cola un tiempo de espera de 0.5 segundos
+        data = self.data_adquisition.data_queue_plot.get(timeout=0.5)
+        data_array = np.column_stack([
+          np.array(data[key])[-10:] for key in sorted(data.keys())
+        ])
+
+        # Si es la primera iteración, inicializar self.data
+        if self.data is None:
+          self.data = data_array
+        else:
+          # Añadir la nueva fila al final de self.data
+          self.data = np.vstack((self.data, data_array))
+
+        # Verificar el tamaño de self.data
+        if len(self.data) >= 3000:
+          # Eliminar las primeras 10 filas
+          self.data = self.data[10:]
+
+        # plotar los datos en tiempo real
+        for i in range(3):
+          self.ax[i].clear()
+          self.ax[i].plot(self.data[:, i*10:(i+1)*10])
+          self.ax[i].set_title(f"Body {i + 1}")
+
+      except queue.Empty:
+        continue
+
+  def update_plot(self, frame):
+    if self.data is not None and len(self.data) > 0:
+      # Actualizar todas las líneas
+      for body in range(3):
+        for sensor in range(10):
+          col = body * 10 + sensor
+          x_data = np.arange(len(self.data))
+          y_data = self.data[:, col]
+          
+          self.lines[body][sensor].set_data(x_data, y_data)
+
+      # Ajustar límites dinámicamente
+      for ax in self.ax:
+          ax.set_xlim(0, len(self.data))
+      
+    return [line for sublist in self.lines for line in sublist]
+
 if __name__ == "__main__":
   adquisition = DataAdquisition()
   data_saver = DataSaver(adquisition)
   data_saver.start()
+  data_plot = DataPlot(adquisition)
+  data_plot.start()
 
   try:
     while True:
-      time.sleep(0.1)
+      time.sleep(0.001)
   except KeyboardInterrupt:
     adquisition.stop()
     data_saver.stop()
-
-
-
-# %%
+    data_plot.stop()
