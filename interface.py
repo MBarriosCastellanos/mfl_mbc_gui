@@ -5,6 +5,11 @@ from PIL import Image, ImageTk
 import numpy as np
 import matplotlib.pyplot as plt
 from tkinter import font, ttk
+# procesamiento de datos
+import multiprocessing
+from multiprocessing import Process, Queue, Event
+from queue import Empty  # Para capturar la excepción en get(timeout=...)
+from objects import DataAdquisition, DataSaver, DataPlot
 
 def generate_random_row():
   sample1 = np.random.rand(1, 10)*(4096 - 1024) + 1024
@@ -13,7 +18,7 @@ def generate_random_row():
   return np.c_[sample1, sample2, sample3]
 
 #%%
-class DataAcquisitionApp:
+class MainInterFace:
   def __init__(self, root):
     # Initialize main window and configure fonts
     self.root = root
@@ -24,6 +29,7 @@ class DataAcquisitionApp:
     self.time_scale = tk.IntVar(value=5)
     self.mag_min = tk.DoubleVar(value=0)
     self.mag_max = tk.DoubleVar(value=6000)
+    self.file_name = tk.StringVar(value="")
     self.plot_type = tk.StringVar(value="Señales")
     self.sampling_rate = 300
     self.auto_scale = 1
@@ -44,6 +50,19 @@ class DataAcquisitionApp:
     self.acquisition_data()
     self.update_plot_real_time()# Update every 100 ms for smooth real-time effect
     
+    # Eliminar inicialización de colas, eventos y procesos
+    self.queue_save = None
+    self.queue_plot = None
+    self.queue_process = None
+    self.stop_event = None
+    self.data_adquisition = None
+    self.data_saver = None
+    self.data_plot = None
+
+    # banderas para ejecutar Procesos
+    self.enable_save = Event()
+    self.enable_plot = Event()
+    self.enable_process = False
 
   def acquisition_data(self):
     sample1 = np.random.rand(1, 10)*(4096 - 1024) + 1024
@@ -135,8 +154,42 @@ class DataAcquisitionApp:
     # Toggle autoscale for plot
     if self.btn_conect.config('text')[-1] == "Conectar":
       self.btn_conect.config(text="Conectado", bg="green", fg="white")
+      # Crear nuevas colas y evento
+      self.queue_save = Queue()
+      self.queue_plot = Queue()
+      self.queue_process = Queue()
+      self.stop_event = Event()
+      
+      # Crear nuevas instancias de procesos
+      self.data_adquisition = DataAdquisition(
+          self.queue_save, 
+          self.queue_plot,
+          self.queue_process,
+          self.stop_event,
+          enable_plot=self.enable_plot,
+          enable_process=self.enable_process,
+          enable_save=self.enable_save
+      )
+
+      # Iniciar procesos
+      self.data_adquisition.start()
     else:
       self.btn_conect.config(text="Conectar", bg=self.hex_color, fg="black")
+      # Detener procesos
+      self.stop_event.set()
+      
+      # Esperar a que terminen
+      if self.data_adquisition is not None:
+          self.data_adquisition.join()
+      
+      
+      # Limpiar referencias
+      self.data_adquisition = None
+      self.data_saver = None
+      self.queue_save = None
+      self.queue_plot = None
+      self.queue_process = None
+      self.stop_event = None
 
   def toggle_alarm(self):
     # Toggle autoscale for plot
@@ -149,9 +202,21 @@ class DataAcquisitionApp:
     # Toggle autoscale for plot
     if self.btn_save.config('text')[-1] == "Guardar":
       self.btn_save.config(text="Guardando", bg="green", fg="white")
+      self.enable_save.set()
+      self.data_adquisition.enable_save.set()
+      self.data_saver = DataSaver(self.queue_save, 
+        self.enable_save, name=str(self.file_name.get())
+      )
+      self.data_saver.start()
+      #self.data_saver.run_event.set()
     else:
       self.btn_save.config(text="Guardar", bg=self.hex_color, fg="black")
-
+      self.data_adquisition.enable_save.clear()
+      self.data_saver.run_event.clear()
+      if self.data_saver is not None:
+        self.enable_save.clear()  # Señala a DataSaver que debe salir
+        self.data_saver.join()       # Espera a que finalice
+        self.data_saver = None
   def create_plot_area(self):
     # Setup plot area with subplots
     self.fig, self.ax = plt.subplots(3, 1, 
@@ -162,11 +227,11 @@ class DataAcquisitionApp:
     # Generate initial plot data
     t = np.linspace(0, self.time_scale.get(), 
                     num=self.time_scale.get() * self.sampling_rate)
-    signals = np.random.rand(10, len(t)) * (4084 - 1000) + 1000  # Simulated signals
+    #signals = np.random.rand(10, len(t)) * (4084 - 1000) + 1000  # Simulated signals
     
     self.ax[2].set_xlabel("tiempo [s]")
     for i in range(3):
-      self.ax[i].plot(t, signals.T)
+      #self.ax[i].plot(t, signals.T)
       self.ax[i].set_ylabel(f"Cuerpo {i+1}")
       self.ax[i].set_ylim([self.mag_min.get(), self.mag_max.get()])
     self.ax[0].set_xlim([0, self.time_scale.get()])
@@ -175,8 +240,8 @@ class DataAcquisitionApp:
     self.ax[0].legend(labels, loc='upper right', 
                 bbox_to_anchor=(1.19, 0.5),  ncol=1, )
     
-    for axis in self.ax:
-      axis.set_ylim([signals.min(), signals.max()])
+    #for axis in self.ax:
+    #  axis.set_ylim([signals.min(), signals.max()])
 
     self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_graf_frame)
     self.canvas.draw()
@@ -185,18 +250,18 @@ class DataAcquisitionApp:
   def update_plot(self):
     # Update plot data when "Aplicar" is clicked
     t = np.linspace(0, self.time_scale.get(), num=self.time_scale.get() * self.sampling_rate)
-    signals = np.random.rand(10, len(t)) * (4000 - 1000) + 1000  # Simulated signals
+    #signals = np.random.rand(10, len(t)) * (4000 - 1000) + 1000  # Simulated signals
     #signals = self.data_matrix
-    print(np.shape(signals))
+    #print(np.shape(signals))
     for axis in self.ax:
       while axis.lines:
         axis.lines[0].remove()
-      axis.plot(t, signals.T)
-      print(np.shape(self.data_matrix))
-      if self.auto_scale==1:
-        axis.set_ylim([signals.min(), signals.max()])
-      else:
-        axis.set_ylim([self.mag_min.get(), self.mag_max.get()])
+      #axis.plot(t, signals.T)
+      #print(np.shape(self.data_matrix))
+      #if self.auto_scale==1:
+      #  axis.set_ylim([signals.min(), signals.max()])
+      #else:
+      #  axis.set_ylim([self.mag_min.get(), self.mag_max.get()])
     axis.set_xlim([0, self.time_scale.get()])
     self.canvas.draw() 
 
@@ -226,7 +291,7 @@ class DataAcquisitionApp:
 
     self.label_save = tk.Label(self.control_frame, text="Archivo")
     self.label_save.grid(row=2, column=1, padx=5)
-    self.save_entry = tk.Entry(self.control_frame, width=15)
+    self.save_entry = tk.Entry(self.control_frame, width=15, textvariable=self.file_name)
     self.save_entry.grid(row=2, column=2, pady=5)
 
   def toggle_button(btn, text_active, text_inactive):
@@ -247,6 +312,7 @@ class DataAcquisitionApp:
     img_label.image = img
 
 if __name__ == "__main__":
+  multiprocessing.freeze_support()
   root = tk.Tk()
-  app = DataAcquisitionApp(root)
+  app = MainInterFace(root)
   root.mainloop()

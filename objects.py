@@ -19,7 +19,7 @@ from matplotlib.animation import FuncAnimation
 # =============================================================================
 class DataAdquisition(Process):
 	def __init__(self, queue_save, queue_plot,  queue_process, stop_event, 
-								enable_save=False, enable_plot=False, enable_process=False):
+							enable_plot=Event(), enable_process=False, enable_save=Event()):
 		""" Inicializa el proceso de adquisición de datos.
 		:param queue_save: Cola para enviar datos al proceso de guardado.
 		:param queue_plot: Cola para enviar datos al proceso de plot.
@@ -162,36 +162,38 @@ class DataAdquisition(Process):
 				if body is not None:
 					# llenar las colas de datos paralelas
 					buffer_acquisition[body].append(values)
-					if self.enable_plot:
+					if self.enable_plot.is_set():
 						buffer_plot[body].append(values)
 					if self.enable_process:
 						buffer_process[body].append(values)
 
 			# Si existen datos en todos los buffers, se determina el mínimo
-			if buffer_acquisition:
-				min_len = min(len(lst) for lst in buffer_acquisition.values())
-			else:
-				min_len = 0
+			min_len = min(len(lst) for lst in buffer_acquisition.values())
+
 
 			# Si existen datos en todos los buffers, se determina el mínimo
-			if buffer_plot:
-				min_len_p = min(len(lst) for lst in buffer_plot.values())
-			else:
-				min_len_p = 0
+			min_len_p = min(len(lst) for lst in buffer_plot.values())
+
 
 			# Si existen datos en todos los buffers, se determina el mínimo
-			if buffer_process:
-				min_len_pr = min(len(lst) for lst in buffer_process.values())
-			else:
-				min_len_pr = 0
+			min_len_pr = min(len(lst) for lst in buffer_process.values())
+
 
 			if min_len_p >= 10:
 				buffer_publish = {}
 				for j, data in buffer_plot.items():
 					buffer_publish[j] = data[:10]
 					buffer_plot[j] = data[10:]
-				if self.enable_plot:
-					self.queue_plot.put(buffer_publish)                
+				if self.enable_plot.is_set():
+					self.queue_plot.put(buffer_publish)       
+
+			if min_len_pr >= 10:
+				buffer_publish = {}
+				for j, data in buffer_process.items():
+					buffer_publish[j] = data[:10]
+					buffer_process[j] = data[10:]
+				if self.enable_process:
+					self.queue_process.put(buffer_publish)             
 
 			# Si se han acumulado suficientes datos, se envían a la cola de plot
 			#if min_len % 10 == 0 and min_len >= 10 and self.enable_plot:
@@ -208,7 +210,7 @@ class DataAdquisition(Process):
 					buffer_publish[j] = data[:300]
 					buffer_acquisition[j] = data[300:]
 					print(f"Para el cuerpo {j} el tamaño es {len(data)}")
-				if self.enable_save:
+				if self.enable_save.is_set():
 					self.queue_save.put(buffer_publish)
 			time.sleep(0.001)
 		self.close_serial_ports()
@@ -225,18 +227,19 @@ class DataAdquisition(Process):
 # Proceso de Guardado de Datos en CSV
 # =============================================================================
 class DataSaver(Process):
-	def __init__(self, queue_save, stop_event):
+	def __init__(self, queue_save, run_event, name=""):
 		""" Proceso que guarda en un archivo CSV los datos que recibe de la cola.
 		"""
 		super().__init__()
 		self.queue_save = queue_save
-		self.stop_event = stop_event
+		self.run_event = run_event
 		self.header_written = False
 		self.writer = None
 		self.csv_file = None
+		self.name = name if len(name)==0 else "_" + name 
 
 	def create_csv_file(self, num_bodies):
-		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S" + self.name)
 		filename = f"datos_{timestamp}.csv"
 		self.csv_file = open(filename, 'w', newline='')
 		self.writer = csv.writer(self.csv_file)
@@ -248,7 +251,7 @@ class DataSaver(Process):
 		self.header_written = True
 
 	def run(self):
-		while not self.stop_event.is_set():
+		while self.run_event.is_set():
 			try:
 				data = self.queue_save.get(timeout=0.5)
 				if not self.header_written:
@@ -273,7 +276,7 @@ class DataSaver(Process):
 # Proceso de Plot de Datos
 # =============================================================================
 class DataPlot(Process):
-	def __init__(self, queue_plot, stop_event):
+	def __init__(self, queue_plot, stop_event, params):
 		"""
 		Proceso que genera gráficos en tiempo real a partir de los datos recibidos.
 		"""
@@ -332,39 +335,39 @@ class DataPlot(Process):
 # =============================================================================
 # Bloque principal
 # =============================================================================
-if __name__ == "__main__":
-	# Para que Windows (y otros sistemas) puedan iniciar correctamente los procesos.
-	multiprocessing.freeze_support()
-
-	# Crear colas para compartir datos entre procesos
-	queue_save = Queue()
-	queue_plot = Queue()
-	queue_process = Queue()
-	# Evento para señalizar el paro de todos los procesos
-	stop_event = Event()
-
-	# Crear e iniciar los procesos
-	data_adquisition = DataAdquisition(queue_save, queue_plot, queue_process,
-										stop_event, 
-										enable_save=True, enable_plot=True)
-	data_saver = DataSaver(queue_save, stop_event)
-	data_plot = DataPlot(queue_plot, stop_event)
-
-	data_adquisition.start()
-	data_saver.start()
-	data_plot.start()
-
-	print("Procesos iniciados. Presiona Ctrl+C para detener.")
-
-	try:
-		while not stop_event.is_set():
-			time.sleep(0.003)
-	except KeyboardInterrupt:
-		print("Se recibió KeyboardInterrupt. Deteniendo procesos...")
-		stop_event.set()
-
-	# Esperar a que todos los procesos finalicen
-	data_adquisition.join()
-	data_saver.join()
-	data_plot.join()
-	print("Todos los procesos han finalizado.")
+#if __name__ == "__main__":
+#	# Para que Windows (y otros sistemas) puedan iniciar correctamente los procesos.
+#	multiprocessing.freeze_support()
+#
+#	# Crear colas para compartir datos entre procesos
+#	queue_save = Queue()
+#	queue_plot = Queue()
+#	queue_process = Queue()
+#	# Evento para señalizar el paro de todos los procesos
+#	stop_event = Event()
+#
+#	# Crear e iniciar los procesos
+#	data_adquisition = DataAdquisition(queue_save, queue_plot, queue_process,
+#										stop_event, 
+#										enable_save=True, enable_plot=True)
+#	data_saver = DataSaver(queue_save, stop_event)
+#	data_plot = DataPlot(queue_plot, stop_event)
+#
+#	data_adquisition.start()
+#	data_saver.start()
+#	data_plot.start()
+#
+#	print("Procesos iniciados. Presiona Ctrl+C para detener.")
+#
+#	try:
+#		while not stop_event.is_set():
+#			time.sleep(0.003)
+#	except KeyboardInterrupt:
+#		print("Se recibió KeyboardInterrupt. Deteniendo procesos...")
+#		stop_event.set()
+#
+#	# Esperar a que todos los procesos finalicen
+#	data_adquisition.join()
+#	data_saver.join()
+#	data_plot.join()
+#	print("Todos los procesos han finalizado.")
