@@ -9,7 +9,7 @@ from tkinter import font, ttk
 import multiprocessing
 from multiprocessing import Process, Queue, Event
 from queue import Empty  # Para capturar la excepción en get(timeout=...)
-from objects import DataAdquisition, DataSaver, DataPlot
+from objects import DataAdquisition, DataSaver
 
 def generate_random_row():
   sample1 = np.random.rand(1, 10)*(4096 - 1024) + 1024
@@ -24,6 +24,22 @@ class MainInterFace:
     self.root = root
     self.root.title("Adquisición de Datos MFL")
     self.setup_fonts()
+
+    # Eliminar inicialización de colas, eventos y procesos
+    self.queue_save = None
+    self.queue_plot = None
+    self.queue_process = None
+    self.stop_event = None
+    self.data_adquisition = None
+    self.data_saver = None
+    self.data_plot = None
+
+    # banderas para ejecutar Procesos
+    self.enable_save = Event()
+    self.enable_plot = Event()
+    self.enable_process = False
+
+    self.data_buffers = None
     
     # Initialize variables
     self.time_scale = tk.IntVar(value=5)
@@ -44,38 +60,11 @@ class MainInterFace:
 
     # Initialize the data matrix to accumulate samples
     self.start_iteration = 0 # Empty matrix with 10 columns for 10 signals
-    self.data_matrix = np.zeros((1,30))
 
     # Start the data acquisition and plot update
-    self.acquisition_data()
     self.update_plot_real_time()# Update every 100 ms for smooth real-time effect
     
-    # Eliminar inicialización de colas, eventos y procesos
-    self.queue_save = None
-    self.queue_plot = None
-    self.queue_process = None
-    self.stop_event = None
-    self.data_adquisition = None
-    self.data_saver = None
-    self.data_plot = None
 
-    # banderas para ejecutar Procesos
-    self.enable_save = Event()
-    self.enable_plot = Event()
-    self.enable_process = False
-
-  def acquisition_data(self):
-    sample1 = np.random.rand(1, 10)*(4096 - 1024) + 1024
-    sample2 = np.random.rand(1, 10)*(4096 - 1024) + 1024
-    sample3 = np.random.rand(1, 10)*(4096 - 1024) + 1024
-    new_sample = np.c_[sample1, sample2, sample3]
-    if self.start_iteration==0:
-      self.data_matrix = new_sample
-    else:
-      self.data_matrix = np.r_[self.data_matrix, new_sample]
-    
-    # Update every 3 ms for smooth real-time effect
-    self.root.after(3, self.acquisition_data)  
 
   def setup_fonts(self):
     # Configure the default font size and style
@@ -159,6 +148,8 @@ class MainInterFace:
       self.queue_plot = Queue()
       self.queue_process = Queue()
       self.stop_event = Event()
+
+      self.enable_plot.set()
       
       # Crear nuevas instancias de procesos
       self.data_adquisition = DataAdquisition(
@@ -173,15 +164,17 @@ class MainInterFace:
 
       # Iniciar procesos
       self.data_adquisition.start()
+
     else:
       self.btn_conect.config(text="Conectar", bg=self.hex_color, fg="black")
+
       # Detener procesos
+      self.data_adquisition.enable_plot.clear()
       self.stop_event.set()
       
       # Esperar a que terminen
       if self.data_adquisition is not None:
           self.data_adquisition.join()
-      
       
       # Limpiar referencias
       self.data_adquisition = None
@@ -190,6 +183,7 @@ class MainInterFace:
       self.queue_plot = None
       self.queue_process = None
       self.stop_event = None
+
 
   def toggle_alarm(self):
     # Toggle autoscale for plot
@@ -217,6 +211,7 @@ class MainInterFace:
         self.enable_save.clear()  # Señala a DataSaver que debe salir
         self.data_saver.join()       # Espera a que finalice
         self.data_saver = None
+
   def create_plot_area(self):
     # Setup plot area with subplots
     self.fig, self.ax = plt.subplots(3, 1, 
@@ -225,8 +220,8 @@ class MainInterFace:
                              bottom=0.1, hspace=0.07)
     
     # Generate initial plot data
-    t = np.linspace(0, self.time_scale.get(), 
-                    num=self.time_scale.get() * self.sampling_rate)
+    #t = np.linspace(0, self.time_scale.get(), 
+    #                num=self.time_scale.get() * self.sampling_rate)
     #signals = np.random.rand(10, len(t)) * (4084 - 1000) + 1000  # Simulated signals
     
     self.ax[2].set_xlabel("tiempo [s]")
@@ -248,26 +243,75 @@ class MainInterFace:
     self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
   def update_plot(self):
+    if self.queue_plot is not None:
+      while True:
+          try:
+            data = self.queue_plot.get_nowait()
+            data_array = np.column_stack(
+                [np.array(data[key])[-10:] for key in sorted(data.keys())]
+            )
+            max_samples = self.time_scale.get() * self.sampling_rate
+            if self.data_plot is None:
+              self.data_plot = data_array
+            else:
+              self.data_plot = np.vstack((self.data_plot, data_array))
+            if len(self.data_plot) > max_samples:
+              self.data_plot = self.data_plot[-max_samples:]
+            len_data = len(self.data_plot)
+            t = np.linspace(0, len_data-1, num=len_data)/self.sampling_rate
+            for i, axis in enumerate(self.ax):
+              while axis.lines:
+                axis.lines[0].remove()
+              axis.plot(t, self.data_plot[:, i*10: (i+1)*10])
+              axis.set_xlim([0, self.time_scale.get()])
+              if self.auto_scale==1:
+                axis.set_ylim([self.data_plot.min(), self.data_plot.max()])
+              else:
+                axis.set_ylim([self.mag_min.get(), self.mag_max.get()])
+            #print("inside de plot data")
+          except Empty:
+            break
     # Update plot data when "Aplicar" is clicked
-    t = np.linspace(0, self.time_scale.get(), num=self.time_scale.get() * self.sampling_rate)
+    #t = np.linspace(0, self.time_scale.get(), num=self.time_scale.get() * self.sampling_rate)
     #signals = np.random.rand(10, len(t)) * (4000 - 1000) + 1000  # Simulated signals
-    #signals = self.data_matrix
     #print(np.shape(signals))
-    for axis in self.ax:
-      while axis.lines:
-        axis.lines[0].remove()
+    #for axis in self.ax:
+      #while axis.lines:
+      #  axis.lines[0].remove()
       #axis.plot(t, signals.T)
-      #print(np.shape(self.data_matrix))
       #if self.auto_scale==1:
       #  axis.set_ylim([signals.min(), signals.max()])
       #else:
       #  axis.set_ylim([self.mag_min.get(), self.mag_max.get()])
-    axis.set_xlim([0, self.time_scale.get()])
+    
     self.canvas.draw() 
+  
 
   def update_plot_real_time(self):
     self.update_plot()
     self.root.after(33, self.update_plot_real_time)  # Update every 33 ms for smooth real-time effect
+  #def update_plot_real_time(self):
+  #  # Leer todos los datos disponibles de queue_plot
+  #  if self.queue_plot is not None:
+  #    while True:
+  #      try:
+  #        print("inside de plot data")
+  #        data = self.queue_plot.get_nowait()
+  #        max_samples = self.time_scale.get() * self.sampling_rate
+  #        for body in [0, 1, 2]:
+  #          body_data = data.get(body, [])
+  #          if len(body_data) != 10:
+  #            continue  # Saltar datos inválidos
+  #          for sensor_idx in range(10):
+  #            # Añadir nuevo dato y truncar si es necesario
+  #            self.data_buffers[body][sensor_idx].append(body_data[sensor_idx])
+  #            if len(self.data_buffers[body][sensor_idx]) > max_samples:
+  #              self.data_buffers[body][sensor_idx] = self.data_buffers[body][sensor_idx][-max_samples:]
+  #      except Empty:
+  #        break
+  #    
+  #    self.update_plot()
+  #    self.root.after(33, self.update_plot_real_time)
 
   def create_control_buttons(self):
     # Button toggles for various control actions

@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 import multiprocessing
 from multiprocessing import Process, Queue, Event
 from queue import Empty  # Para capturar la excepción en get(timeout=...)
-from matplotlib.animation import FuncAnimation
 
 # =============================================================================
 # Proceso de Adquisición de Datos
