@@ -9,7 +9,13 @@ from tkinter import font, ttk
 import multiprocessing
 from multiprocessing import Process, Queue, Event
 from queue import Empty  # Para capturar la excepción en get(timeout=...)
-from objects import DataAdquisition, DataSaver
+from objects import DataAdquisition, DataSaver, DataAlarm
+from matplotlib.colors import LinearSegmentedColormap
+colors = [(0,    (1, 1, 1)),       # Green
+          (1,    (0.5,     0, 0))]      # red
+cmap1 = LinearSegmentedColormap.from_list('custom_cmap', colors, 
+                                          N=2
+                                          )
 
 def generate_random_row():
   sample1 = np.random.rand(1, 10)*(4096 - 1024) + 1024
@@ -25,7 +31,7 @@ class MainInterFace:
     self.root.title("Adquisición de Datos MFL")
     self.setup_fonts()
 
-    # Eliminar inicialización de colas, eventos y procesos
+    # inicialización de colas, eventos y procesos
     self.queue_save = None
     self.queue_plot = None
     self.queue_process = None
@@ -37,7 +43,7 @@ class MainInterFace:
     # banderas para ejecutar Procesos
     self.enable_save = Event()
     self.enable_plot = Event()
-    self.enable_process = False
+    self.enable_process = Event()
 
     self.data_buffers = None
     
@@ -50,11 +56,13 @@ class MainInterFace:
     self.sampling_rate = 300
     self.auto_scale = 1
     self.hex_color = "#CDCDCD"  # Default button color
+    self.labels = [f's{i+1}' for i in range(10)]
     
     # Set up the main GUI layout
     self.create_frames()
     self.create_plot_controls()
     self.create_plot_area()
+    self.create_alarm_area()
     self.create_control_buttons()
     self.create_image_display()
 
@@ -63,8 +71,6 @@ class MainInterFace:
 
     # Start the data acquisition and plot update
     self.update_plot_real_time()# Update every 100 ms for smooth real-time effect
-    
-
 
   def setup_fonts(self):
     # Configure the default font size and style
@@ -84,7 +90,10 @@ class MainInterFace:
     self.plot_data_frame.pack(side=tk.TOP, pady=3)
 
     self.plot_graf_frame = tk.Frame(self.plot_frame)
-    self.plot_graf_frame.pack(side=tk.TOP, pady=7)
+    self.plot_graf_frame.pack(side=tk.LEFT, pady=7, padx=7)
+
+    self.plot_graf_alarm = tk.Frame(self.plot_frame)
+    self.plot_graf_alarm.pack(side=tk.RIGHT, pady=7, padx=3)
 
     self.image_frame = tk.Frame(self.right_frame)
     self.image_frame.pack(side=tk.TOP, pady=5)
@@ -184,7 +193,6 @@ class MainInterFace:
       self.queue_process = None
       self.stop_event = None
 
-
   def toggle_alarm(self):
     # Toggle autoscale for plot
     if self.btn_alarm.config('text')[-1] == "Alarma":
@@ -202,7 +210,6 @@ class MainInterFace:
         self.enable_save, name=str(self.file_name.get())
       )
       self.data_saver.start()
-      #self.data_saver.run_event.set()
     else:
       self.btn_save.config(text="Guardar", bg=self.hex_color, fg="black")
       self.data_adquisition.enable_save.clear()
@@ -219,30 +226,56 @@ class MainInterFace:
     self.fig.subplots_adjust(left=0.12, right=0.86, top=0.93, 
                              bottom=0.1, hspace=0.07)
     
-    # Generate initial plot data
-    #t = np.linspace(0, self.time_scale.get(), 
-    #                num=self.time_scale.get() * self.sampling_rate)
-    #signals = np.random.rand(10, len(t)) * (4084 - 1000) + 1000  # Simulated signals
-    
     self.ax[2].set_xlabel("tiempo [s]")
     for i in range(3):
       #self.ax[i].plot(t, signals.T)
-      self.ax[i].set_ylabel(f"Cuerpo {i+1}")
-      self.ax[i].set_ylim([self.mag_min.get(), self.mag_max.get()])
+      self.ax[2-i].set_ylabel(f"Cuerpo {i+1}")
+      self.ax[2-i].set_ylim([self.mag_min.get(), self.mag_max.get()])
     self.ax[0].set_xlim([0, self.time_scale.get()])
-    labels = [f's{i+1}' for i in range(10)]
     # Adding legend to axis 0, one label per row
-    self.ax[0].legend(labels, loc='upper right', 
+    self.ax[0].legend(self.labels, loc='upper right', 
                 bbox_to_anchor=(1.19, 0.5),  ncol=1, )
-    
-    #for axis in self.ax:
-    #  axis.set_ylim([signals.min(), signals.max()])
 
     self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_graf_frame)
     self.canvas.draw()
     self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
+  def create_alarm_area(self):
+    # Configuración de la figura y ejes
+    self.fig2, self.ax2 = plt.subplots(3, 1, figsize=(1, 4), 
+                                      dpi=150, sharex=True)
+    self.fig2.subplots_adjust(left=0.3, right=0.9, top=0.93, 
+                              bottom=0.1, hspace=0.007)
+
+    # Preparación de datos para pcolormesh (necesitan ser 2D)
+    x_edges = np.array([0.8, 1.2])  # Bordes en X (debe tener 1 elemento más que la dimensión de los datos)
+    y_edges = np.linspace(0.3, 10.8, 11)  # 11 bordes para 10 celdas verticales
+    X, Y = np.meshgrid(x_edges, y_edges)  # Crear mallas para pcolormesh
+    Z = np.array([[0],[0],[0],[0],[1],[1],[0],[0],[1],[0]])
+
+    for i in range(3):
+      # Crear el gráfico de mapa de colores
+      mesh = self.ax2[i].pcolormesh(X, Y, Z, shading='flat', cmap=cmap1)
+      
+      # Configuración de ejes (similar al original)
+      self.ax2[i].set_ylabel(f"Cuerpo {i+1}")
+      self.ax2[i].set_ylim([0.3, 10.8])
+      self.ax2[i].set_yticks(np.linspace(1, 10, 10))  # Centros de las celdas
+      self.ax2[i].set_yticklabels(self.labels, fontsize=8)
+    self.ax2[i].set_xlim([0.8, 1.2])
+    self.ax2[i].set_xticks([1])  # Centros de las celdas
+    self.ax2[i].set_xticklabels([])  # Centros de las celdas
+    self.ax2[i].set_xlabel("Alarmas")  # Centros de las celdas
+
+    #self.ax2[i].set_yticklabels(self.labels, fontsize=8)
+
+
+    self.canvas2 = FigureCanvasTkAgg(self.fig2, master=self.plot_graf_alarm)
+    self.canvas2.draw()
+    self.canvas2.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
   def update_plot(self):
+    labels = [f's{i+1}' for i in range(10)]
     if self.queue_plot is not None:
       while True:
           try:
@@ -259,59 +292,24 @@ class MainInterFace:
               self.data_plot = self.data_plot[-max_samples:]
             len_data = len(self.data_plot)
             t = np.linspace(0, len_data-1, num=len_data)/self.sampling_rate
-            for i, axis in enumerate(self.ax):
-              while axis.lines:
-                axis.lines[0].remove()
-              axis.plot(t, self.data_plot[:, i*10: (i+1)*10])
-              axis.set_xlim([0, self.time_scale.get()])
+            for i in range(3):
+              while self.ax[2-i].lines:
+                self.ax[2-i].lines[0].remove()
+              self.ax[2-i].plot(t, self.data_plot[:, i*10: (i+1)*10])
+              self.ax[2-i].set_xlim([0, self.time_scale.get()])
               if self.auto_scale==1:
-                axis.set_ylim([self.data_plot.min(), self.data_plot.max()])
+                self.ax[2-i].set_ylim([self.data_plot.min(), self.data_plot.max()])
               else:
-                axis.set_ylim([self.mag_min.get(), self.mag_max.get()])
-            #print("inside de plot data")
+                self.ax[2-i].set_ylim([self.mag_min.get(), self.mag_max.get()])
+            self.ax[0].legend(labels, loc='upper right', 
+              bbox_to_anchor=(1.19, 0.5),  ncol=1, )
           except Empty:
             break
-    # Update plot data when "Aplicar" is clicked
-    #t = np.linspace(0, self.time_scale.get(), num=self.time_scale.get() * self.sampling_rate)
-    #signals = np.random.rand(10, len(t)) * (4000 - 1000) + 1000  # Simulated signals
-    #print(np.shape(signals))
-    #for axis in self.ax:
-      #while axis.lines:
-      #  axis.lines[0].remove()
-      #axis.plot(t, signals.T)
-      #if self.auto_scale==1:
-      #  axis.set_ylim([signals.min(), signals.max()])
-      #else:
-      #  axis.set_ylim([self.mag_min.get(), self.mag_max.get()])
-    
     self.canvas.draw() 
   
-
   def update_plot_real_time(self):
     self.update_plot()
     self.root.after(33, self.update_plot_real_time)  # Update every 33 ms for smooth real-time effect
-  #def update_plot_real_time(self):
-  #  # Leer todos los datos disponibles de queue_plot
-  #  if self.queue_plot is not None:
-  #    while True:
-  #      try:
-  #        print("inside de plot data")
-  #        data = self.queue_plot.get_nowait()
-  #        max_samples = self.time_scale.get() * self.sampling_rate
-  #        for body in [0, 1, 2]:
-  #          body_data = data.get(body, [])
-  #          if len(body_data) != 10:
-  #            continue  # Saltar datos inválidos
-  #          for sensor_idx in range(10):
-  #            # Añadir nuevo dato y truncar si es necesario
-  #            self.data_buffers[body][sensor_idx].append(body_data[sensor_idx])
-  #            if len(self.data_buffers[body][sensor_idx]) > max_samples:
-  #              self.data_buffers[body][sensor_idx] = self.data_buffers[body][sensor_idx][-max_samples:]
-  #      except Empty:
-  #        break
-  #    
-  #    self.update_plot()
-  #    self.root.after(33, self.update_plot_real_time)
 
   def create_control_buttons(self):
     # Button toggles for various control actions
@@ -346,7 +344,7 @@ class MainInterFace:
       
   def create_image_display(self):
     # Display static image in the right frame
-    img_path = "mfl_sup.png"  # Ensure this path is correct
+    img_path = "mfl_sup.jpg"  # Ensure this path is correct
     img = Image.open(img_path)
     img = img.resize((730, int((730 / float(img.size[0])) * img.size[1])), Image.Resampling.LANCZOS)
     img = ImageTk.PhotoImage(img)

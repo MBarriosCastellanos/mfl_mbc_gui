@@ -18,7 +18,7 @@ from queue import Empty  # Para capturar la excepción en get(timeout=...)
 # =============================================================================
 class DataAdquisition(Process):
 	def __init__(self, queue_save, queue_plot,  queue_process, stop_event, 
-							enable_plot=Event(), enable_process=False, enable_save=Event()):
+							enable_plot=Event(), enable_process=Event(), enable_save=Event()):
 		""" Inicializa el proceso de adquisición de datos.
 		:param queue_save: Cola para enviar datos al proceso de guardado.
 		:param queue_plot: Cola para enviar datos al proceso de plot.
@@ -163,20 +163,17 @@ class DataAdquisition(Process):
 					buffer_acquisition[body].append(values)
 					if self.enable_plot.is_set():
 						buffer_plot[body].append(values)
-					if self.enable_process:
+					if self.enable_process.is_set():
 						buffer_process[body].append(values)
 
 			# Si existen datos en todos los buffers, se determina el mínimo
 			min_len = min(len(lst) for lst in buffer_acquisition.values())
 
-
 			# Si existen datos en todos los buffers, se determina el mínimo
 			min_len_p = min(len(lst) for lst in buffer_plot.values())
 
-
 			# Si existen datos en todos los buffers, se determina el mínimo
 			min_len_pr = min(len(lst) for lst in buffer_process.values())
-
 
 			if min_len_p >= 10:
 				buffer_publish = {}
@@ -186,18 +183,13 @@ class DataAdquisition(Process):
 				if self.enable_plot.is_set():
 					self.queue_plot.put(buffer_publish)       
 
-			if min_len_pr >= 10:
+			if min_len_pr >= 1:
 				buffer_publish = {}
 				for j, data in buffer_process.items():
-					buffer_publish[j] = data[:10]
-					buffer_process[j] = data[10:]
-				if self.enable_process:
+					buffer_publish[j] = data[:1]
+					buffer_process[j] = data[1:]
+				if self.enable_process.is_set():
 					self.queue_process.put(buffer_publish)             
-
-			# Si se han acumulado suficientes datos, se envían a la cola de plot
-			#if min_len % 10 == 0 and min_len >= 10 and self.enable_plot:
-			#    # Se envía una copia del buffer (para evitar condiciones de carrera)
-			#    self.queue_plot.put(buffer_acquisition.copy())
 
 			iterations += 1
 			if min_len >= 300:
@@ -274,41 +266,24 @@ class DataSaver(Process):
 # =============================================================================
 # Proceso de Plot de Datos
 # =============================================================================
-class DataPlot(Process):
-	def __init__(self, queue_plot, stop_event, params):
-		"""
-		Proceso que genera gráficos en tiempo real a partir de los datos recibidos.
-		"""
+class DataAlarm(Process):
+	def __init__(self, queue_alarm, run_event, params=[0]):
 		super().__init__()
-		self.queue_plot = queue_plot
-		self.stop_event = stop_event
+		self.queue_plot = queue_alarm
+		self.run_event = run_event
 		self.data = None
-
-	def run(self):
-		#plt.ion()  # Modo interactivo
-		fig, ax = plt.subplots()  # Aquí se define 'fig' y 'ax'
-		ax.set_xlim(0, 3000)
-		ax.set_ylim(2250, 2500)
+		self.threshold = params[0]
 		
-		# Crea las líneas (suponiendo que self.data ya se haya inicializado o se defina aquí)
-		lines = []  # Lista para almacenar las líneas de cada sensor
-		if self.data is not None:
-			num_lines = self.data.shape[1]
-		else:
-			# Si aún no hay datos, asume un número de líneas (por ejemplo, 4 sensores)
-			num_lines = 30
-		for i in range(num_lines):
-			line, = ax.plot([], [], lw=1, label=f"Sensor {i+1}")
-			lines.append(line)
-		ax.legend()
-
-		def update_plot(frame):
+	def run(self):
+		print(run_event.is_set())
+		while self.run_event.is_set():
 			try:
 				# Procesa todos los datos disponibles en la cola sin bloquear
 				while not self.queue_plot.empty():
 					data = self.queue_plot.get_nowait()
 					try:
-						data_array = np.column_stack([np.array(data[key])[-10:] for key in sorted(data.keys())])
+						data_array = np.column_stack(
+							[np.array(data[key]) for key in sorted(data.keys())])
 					except Exception as e:
 						print(f"Error al concatenar datos: {e}")
 						continue
@@ -317,24 +292,43 @@ class DataPlot(Process):
 						self.data = data_array
 					else:
 						self.data = np.vstack((self.data, data_array))
-					if len(self.data) > 3000:
-						self.data = self.data[10:]
+
+					# 1. CONSTRUCCIÓN DE LA MUESTRA DE DATOS
+					sample_size = 20 
+					self.data_sample.append(self.data)
+					if len(self.data_sample) > sample_size:
+						self.data.pop(0)
+
+ 					# 2. PROCESAMIENTO DE LA MUESTRA SI ES SUFICIENTEMENTE GRANDE
+					if len(self.data_sample) >= sample_size:    # Si se tiene el tamaño nesario de la 
+							# Convierte la muestra en un arreglo de NumPy para procesamiento
+							rms = np.sqrt(np.mean(self.data_sample ** 2, axis=0))  # Calcula el RMS de cada sensor
+							ymax = np.max(self.data_sample, axis=0)  # Encuentra los valores máximos de cada sensor
+
+							# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
+							eval_alarmas = ymax > (rms + threshold)
+							self.alarms = eval_alarmas*1
+
+							# 3. ACCIÓN EN CASO DE ALARMA
+							if any(eval_alarmas):  # Si se detecta una alarma
+								try:
+									frequency = 2000  # Frecuencia del sonido de alarma en Hz
+									duration = 800  # Duración del sonido en milisegundos
+									winsound.Beep(frequency, duration)  # Genera el sonido
+									# Reduce la muestra a la mitad para evitar alarmas repetitivas
+									self.data_sample = self.data_sample[-10:]
+								except Exception as e:
+									print(f"Error al emitir alarma sonora: {e}")
+
+
 			except Exception as e:
 				print(f"Error en update_plot: {e}")
-
-			if self.data is not None:
-				x_data = np.arange(len(self.data))
-				for i, line in enumerate(lines):
-					line.set_data(x_data, self.data[:, i])
-			return lines  # Importante para blitting
-
-		ani = FuncAnimation(fig, update_plot, interval=33, cache_frame_data=True)
-		plt.show()
 
 # =============================================================================
 # Bloque principal
 # =============================================================================
 #if __name__ == "__main__":
+#	stop_event = Event()
 #	# Para que Windows (y otros sistemas) puedan iniciar correctamente los procesos.
 #	multiprocessing.freeze_support()
 #
@@ -342,19 +336,27 @@ class DataPlot(Process):
 #	queue_save = Queue()
 #	queue_plot = Queue()
 #	queue_process = Queue()
+#	threshold = 10
+#
 #	# Evento para señalizar el paro de todos los procesos
-#	stop_event = Event()
+#	enable_plot=Event() 
+#	enable_process=Event() 
+#	enable_save=Event()
+#		
+#	enable_process.set()
 #
 #	# Crear e iniciar los procesos
 #	data_adquisition = DataAdquisition(queue_save, queue_plot, queue_process,
-#										stop_event, 
-#										enable_save=True, enable_plot=True)
+#										stop_event=stop_event,
+#										enable_plot=enable_plot, 
+#										enable_process=enable_process, 
+#										enable_save=enable_save)
 #	data_saver = DataSaver(queue_save, stop_event)
-#	data_plot = DataPlot(queue_plot, stop_event)
+#	data_process = DataAlarm(queue_process, enable_save)
 #
 #	data_adquisition.start()
-#	data_saver.start()
-#	data_plot.start()
+#	#data_saver.start()
+#	data_process.start()
 #
 #	print("Procesos iniciados. Presiona Ctrl+C para detener.")
 #
