@@ -11,7 +11,33 @@ import time
 import matplotlib.pyplot as plt
 import multiprocessing
 from multiprocessing import Process, Queue, Event
-from queue import Empty  # Para capturar la excepción en get(timeout=...)
+import winsound  # Permite generar sonidos en sistemas Windows
+
+# =============================================================================
+# Funciones auxiliares
+# =============================================================================
+def buffer_management( buffer, enable, queue, threshold,
+	printV=False, n_it=0,
+	start_time_loop=0):	
+	
+	min_len = min(len(lst) for lst in buffer.values())
+
+	n_it =  n_it + 1 if printV else n_it
+	if min_len >= threshold:
+		if printV:
+			elapsed = time.time() - start_time_loop
+			print("elapsed time : %.4f, n_it %s =================" % (
+				elapsed, n_it ))
+		buffer_publish = {}
+		for j, data in buffer.items():
+			buffer_publish[j] = data[:threshold]
+			buffer[j] = data[threshold:]
+			if printV:
+				print(f"Para el cuerpo {j} el tamaño es {len(data)}")
+				n_it = 0		
+		if enable.is_set():
+			queue.put(buffer_publish)
+	return queue, buffer, n_it
 
 # =============================================================================
 # Proceso de Adquisición de Datos
@@ -147,8 +173,8 @@ class DataAdquisition(Process):
 		buffer_acquisition = {i: [] for i in range(n_ports)}
 		buffer_plot = {i: [] for i in range(n_ports)}
 		buffer_process = {i: [] for i in range(n_ports)}
-		iterations = 0
-		print_iteration = 0
+		
+		n_it = 0
 		start_time_loop = time.time()
 
 		# Reabrir los puertos para la adquisición
@@ -166,43 +192,17 @@ class DataAdquisition(Process):
 					if self.enable_process.is_set():
 						buffer_process[body].append(values)
 
-			# Si existen datos en todos los buffers, se determina el mínimo
-			min_len = min(len(lst) for lst in buffer_acquisition.values())
+			self.queue_plot, buffer_plot, _ =  buffer_management(
+				buffer_plot, self.enable_plot, self.queue_plot, 10)
+			#print(f"Tamaño de queue_plot: {self.queue_plot.qsize()}") 
 
-			# Si existen datos en todos los buffers, se determina el mínimo
-			min_len_p = min(len(lst) for lst in buffer_plot.values())
+			self.queue_process, buffer_process, _ =  buffer_management(
+				buffer_process, self.enable_process, self.queue_process, 1)
 
-			# Si existen datos en todos los buffers, se determina el mínimo
-			min_len_pr = min(len(lst) for lst in buffer_process.values())
+			self.queue_save, buffer_acquisition, n_it =  buffer_management(
+				buffer_acquisition, self.enable_save, self.queue_save, 300,
+				True, n_it, start_time_loop)
 
-			if min_len_p >= 10:
-				buffer_publish = {}
-				for j, data in buffer_plot.items():
-					buffer_publish[j] = data[:10]
-					buffer_plot[j] = data[10:]
-				if self.enable_plot.is_set():
-					self.queue_plot.put(buffer_publish)       
-
-			if min_len_pr >= 1:
-				buffer_publish = {}
-				for j, data in buffer_process.items():
-					buffer_publish[j] = data[:1]
-					buffer_process[j] = data[1:]
-				if self.enable_process.is_set():
-					self.queue_process.put(buffer_publish)             
-
-			iterations += 1
-			if min_len >= 300:
-				elapsed = time.time() - start_time_loop
-				print("elapsed time : %.4f, Iterations %s =================" % (elapsed, iterations - print_iteration))
-				print_iteration = iterations
-				buffer_publish = {}
-				for j, data in buffer_acquisition.items():
-					buffer_publish[j] = data[:300]
-					buffer_acquisition[j] = data[300:]
-					print(f"Para el cuerpo {j} el tamaño es {len(data)}")
-				if self.enable_save.is_set():
-					self.queue_save.put(buffer_publish)
 			time.sleep(0.001)
 		self.close_serial_ports()
 
@@ -259,28 +259,30 @@ class DataSaver(Process):
 				self.csv_file.flush()
 
 			except Exception as e:
-				print(f"Error en DataSaver: {e}")
+				print(f"Esperando datos para guardar... {e}")
 		#if self.csv_file:
 		#	self.csv_file.close()
 
 # =============================================================================
-# Proceso de Plot de Datos
+# Proceso de Alarma de Datos
 # =============================================================================
 class DataAlarm(Process):
-	def __init__(self, queue_alarm, run_event, params=[0]):
+	def __init__(self, queue_alarm, run_event, threshold):
 		super().__init__()
-		self.queue_plot = queue_alarm
+		self.queue = queue_alarm
 		self.run_event = run_event
 		self.data = None
-		self.threshold = params[0]
+		self.threshold = threshold
 		
 	def run(self):
-		print(run_event.is_set())
+		print("state data save", self.run_event.is_set())
 		while self.run_event.is_set():
+			current_threshold = self.threshold.value
+			print(f"Alarm active, Thnreshokd {current_threshold}")
 			try:
 				# Procesa todos los datos disponibles en la cola sin bloquear
-				while not self.queue_plot.empty():
-					data = self.queue_plot.get_nowait()
+				while not self.queue.empty():
+					data = self.queue.get_nowait()
 					try:
 						data_array = np.column_stack(
 							[np.array(data[key]) for key in sorted(data.keys())])
@@ -295,31 +297,29 @@ class DataAlarm(Process):
 
 					# 1. CONSTRUCCIÓN DE LA MUESTRA DE DATOS
 					sample_size = 20 
-					self.data_sample.append(self.data)
-					if len(self.data_sample) > sample_size:
-						self.data.pop(0)
+					if len(self.data) > sample_size:
+						self.data = self.data[-sample_size:, :]
 
  					# 2. PROCESAMIENTO DE LA MUESTRA SI ES SUFICIENTEMENTE GRANDE
-					if len(self.data_sample) >= sample_size:    # Si se tiene el tamaño nesario de la 
-							# Convierte la muestra en un arreglo de NumPy para procesamiento
-							rms = np.sqrt(np.mean(self.data_sample ** 2, axis=0))  # Calcula el RMS de cada sensor
-							ymax = np.max(self.data_sample, axis=0)  # Encuentra los valores máximos de cada sensor
+					if len(self.data) >= sample_size:    # Si se tiene el tamaño nesario de la 
+						# Convierte la muestra en un arreglo de NumPy para procesamiento
+						rms = np.sqrt(np.mean(self.data ** 2, axis=0))  # Calcula el RMS de cada sensor
+						ymax = np.max(self.data, axis=0)  # Encuentra los valores máximos de cada sensor
 
-							# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
-							eval_alarmas = ymax > (rms + threshold)
-							self.alarms = eval_alarmas*1
+						# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
+						eval_alarmas = ymax > (rms + current_threshold)
+						self.alarms = eval_alarmas*1
 
-							# 3. ACCIÓN EN CASO DE ALARMA
-							if any(eval_alarmas):  # Si se detecta una alarma
-								try:
-									frequency = 2000  # Frecuencia del sonido de alarma en Hz
-									duration = 800  # Duración del sonido en milisegundos
-									winsound.Beep(frequency, duration)  # Genera el sonido
-									# Reduce la muestra a la mitad para evitar alarmas repetitivas
-									self.data_sample = self.data_sample[-10:]
-								except Exception as e:
-									print(f"Error al emitir alarma sonora: {e}")
-
+						# 3. ACCIÓN EN CASO DE ALARMA
+						if any(eval_alarmas):  # Si se detecta una alarma
+							try:
+								frequency = 2000  # Frecuencia del sonido de alarma en Hz
+								duration = 800  # Duración del sonido en milisegundos
+								winsound.Beep(frequency, duration)  # Genera el sonido
+								# Reduce la muestra a la mitad para evitar alarmas repetitivas
+								self.data = self.data[-10:]
+							except Exception as e:
+								print(f"Error al emitir alarma sonora: {e}")
 
 			except Exception as e:
 				print(f"Error en update_plot: {e}")
@@ -336,14 +336,16 @@ class DataAlarm(Process):
 #	queue_save = Queue()
 #	queue_plot = Queue()
 #	queue_process = Queue()
-#	threshold = 10
+#	threshold = 20
 #
 #	# Evento para señalizar el paro de todos los procesos
 #	enable_plot=Event() 
 #	enable_process=Event() 
 #	enable_save=Event()
-#		
+#	
+#	#enable_plot.set()
 #	enable_process.set()
+#	#enable_save.set()
 #
 #	# Crear e iniciar los procesos
 #	data_adquisition = DataAdquisition(queue_save, queue_plot, queue_process,
@@ -351,12 +353,12 @@ class DataAlarm(Process):
 #										enable_plot=enable_plot, 
 #										enable_process=enable_process, 
 #										enable_save=enable_save)
-#	data_saver = DataSaver(queue_save, stop_event)
-#	data_process = DataAlarm(queue_process, enable_save)
+#	data_process = DataAlarm(queue_process, enable_process, threshold)
+#	data_saver = DataSaver(queue_save, enable_save)
 #
 #	data_adquisition.start()
-#	#data_saver.start()
 #	data_process.start()
+#	#data_saver.start()
 #
 #	print("Procesos iniciados. Presiona Ctrl+C para detener.")
 #

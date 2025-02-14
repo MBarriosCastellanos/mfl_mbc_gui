@@ -12,18 +12,22 @@ from queue import Empty  # Para capturar la excepción en get(timeout=...)
 from objects import DataAdquisition, DataSaver, DataAlarm
 from matplotlib.colors import LinearSegmentedColormap
 colors = [(0,    (1, 1, 1)),       # Green
-          (1,    (0.5,     0, 0))]      # red
+          (1,    (1,     0, 0))]      # red
 cmap1 = LinearSegmentedColormap.from_list('custom_cmap', colors, 
                                           N=2
                                           )
-
-def generate_random_row():
-  sample1 = np.random.rand(1, 10)*(4096 - 1024) + 1024
-  sample2 = np.random.rand(1, 10)*(4096 - 1024) + 1024
-  sample3 = np.random.rand(1, 10)*(4096 - 1024) + 1024
-  return np.c_[sample1, sample2, sample3]
-
 #%%
+
+# En create_control_buttons (definir validación)
+def validate_float_input(new_val):
+    if new_val in ("", "-", ".", "-."):
+        return True  # Permite borrar o empezar a escribir
+    try:
+        float(new_val)
+        return True
+    except ValueError:
+        return False
+
 class MainInterFace:
   def __init__(self, root):
     # Initialize main window and configure fonts
@@ -57,6 +61,10 @@ class MainInterFace:
     self.auto_scale = 1
     self.hex_color = "#CDCDCD"  # Default button color
     self.labels = [f's{i+1}' for i in range(10)]
+    
+    # Reemplazar la variable Tkinter con una compartida
+    self.alarm_threshold = multiprocessing.Value('d', 30.0)
+    self.alarm_threshold_tk = tk.DoubleVar(value=30.0)  # Variable Tk para el Entry
     
     # Set up the main GUI layout
     self.create_frames()
@@ -190,22 +198,31 @@ class MainInterFace:
       self.data_saver = None
       self.queue_save = None
       self.queue_plot = None
-      self.queue_process = None
+      self.queue_process = None 
       self.stop_event = None
 
   def toggle_alarm(self):
     # Toggle autoscale for plot
     if self.btn_alarm.config('text')[-1] == "Alarma":
       self.btn_alarm.config(text="Alarma Activa", bg="green", fg="white")
+      self.enable_process.set()
+      self.data_process = DataAlarm(self.queue_process, 
+                          self.enable_process, self.alarm_threshold)
+      self.data_process.start()
     else:
       self.btn_alarm.config(text="Alarma", bg=self.hex_color, fg="black")
+      self.data_adquisition.enable_process.clear()
+      self.data_process.run_event.clear()
+      if self.data_process is not None:
+        self.enable_process.clear()  # Señala a DataSaver que debe salir
+        self.data_process.join()       # Espera a que finalice
+        self.data_process = None
 
   def toggle_save(self):
     # Toggle autoscale for plot
     if self.btn_save.config('text')[-1] == "Guardar":
       self.btn_save.config(text="Guardando", bg="green", fg="white")
       self.enable_save.set()
-      self.data_adquisition.enable_save.set()
       self.data_saver = DataSaver(self.queue_save, 
         self.enable_save, name=str(self.file_name.get())
       )
@@ -309,7 +326,7 @@ class MainInterFace:
   
   def update_plot_real_time(self):
     self.update_plot()
-    self.root.after(33, self.update_plot_real_time)  # Update every 33 ms for smooth real-time effect
+    self.root.after(33, self.update_plot_real_time)  
 
   def create_control_buttons(self):
     # Button toggles for various control actions
@@ -323,7 +340,10 @@ class MainInterFace:
 
     self.label_alarm = tk.Label(self.control_frame, text="Umbral")
     self.label_alarm.grid(row=1, column=1, padx=5)
-    self.entry_alarm = tk.Entry(self.control_frame, width=15)
+    self.entry_alarm = tk.Entry(self.control_frame, width=15, 
+      textvariable=self.alarm_threshold_tk)
+    # Añadir un trace para actualizar la variable compartida
+    self.alarm_threshold_tk.trace_add("write", self.update_alarm_threshold)
     self.entry_alarm.grid(row=1, column=2, padx=5)
 
     # save data ----------------------------------------------------------------
@@ -335,6 +355,14 @@ class MainInterFace:
     self.label_save.grid(row=2, column=1, padx=5)
     self.save_entry = tk.Entry(self.control_frame, width=15, textvariable=self.file_name)
     self.save_entry.grid(row=2, column=2, pady=5)
+
+  def update_alarm_threshold(self, *args):
+    value = self.alarm_threshold_tk.get()
+    try:
+        new_value = float(value) if value else 30.0  # Valor por defecto si está vacío
+        self.alarm_threshold.value = new_value
+    except ValueError:
+        pass  # Ignora valores inválidos (no debería ocurrir gracias a la validación)
 
   def toggle_button(btn, text_active, text_inactive):
     if btn.config('text')[-1] == text_inactive:
