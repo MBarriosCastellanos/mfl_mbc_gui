@@ -43,18 +43,26 @@ class MainInterFace:
     self.data_adquisition = None
     self.data_saver = None
     self.data_plot = None
+    self.data_process = None
 
     # banderas para ejecutar Procesos
     self.enable_save = Event()
     self.enable_plot = Event()
     self.enable_process = Event()
+    self.manager = multiprocessing.Manager()
+    self.shared_alarms = self.manager.dict()  # Diccionario compartido
+    self.shared_alarms.update({
+        0: np.array([[0]] * 10),  # 10 sensores, valor inicial 0
+        1: np.array([[0]] * 10),
+        2: np.array([[0]] * 10)
+    })
 
     self.data_buffers = None
     
     # Initialize variables
     self.time_scale = tk.IntVar(value=5)
-    self.mag_min = tk.DoubleVar(value=0)
-    self.mag_max = tk.DoubleVar(value=6000)
+    self.mag_min = tk.DoubleVar(value=2000)
+    self.mag_max = tk.DoubleVar(value=3000)
     self.file_name = tk.StringVar(value="")
     self.plot_type = tk.StringVar(value="Señales")
     self.sampling_rate = 300
@@ -63,8 +71,8 @@ class MainInterFace:
     self.labels = [f's{i+1}' for i in range(10)]
     
     # Reemplazar la variable Tkinter con una compartida
-    self.alarm_threshold = multiprocessing.Value('d', 30.0)
-    self.alarm_threshold_tk = tk.DoubleVar(value=30.0)  # Variable Tk para el Entry
+    self.alarm_threshold = multiprocessing.Value('d', 40.0)
+    self.alarm_threshold_tk = tk.DoubleVar(value=40.0)  # Usar StringVar en lugar de DoubleVar
     
     # Set up the main GUI layout
     self.create_frames()
@@ -73,9 +81,6 @@ class MainInterFace:
     self.create_alarm_area()
     self.create_control_buttons()
     self.create_image_display()
-
-    # Initialize the data matrix to accumulate samples
-    self.start_iteration = 0 # Empty matrix with 10 columns for 10 signals
 
     # Start the data acquisition and plot update
     self.update_plot_real_time()# Update every 100 ms for smooth real-time effect
@@ -130,14 +135,16 @@ class MainInterFace:
              ).grid(row=1, column=2, columnspan=4, padx=5, sticky='ew')
     tk.Label(self.plot_data_frame, text="Min"
             ).grid(row=2, column=2, padx=5)
-    self.entry_ymin = tk.Entry(self.plot_data_frame, width=10, textvariable=self.mag_min, 
-             state=self.scale_widgets_state)
+    self.entry_ymin = tk.Entry(self.plot_data_frame, width=10, 
+              textvariable=self.mag_min, 
+              state=self.scale_widgets_state)
     self.entry_ymin.grid(row=2, column=3, padx=5)
 
     tk.Label(self.plot_data_frame, text="Max"
             ).grid(row=2, column=4, padx=5)
-    self.entry_ymax = tk.Entry(self.plot_data_frame, width=10, textvariable=self.mag_max, 
-             state=self.scale_widgets_state)
+    self.entry_ymax = tk.Entry(self.plot_data_frame, width=10, 
+              textvariable=self.mag_max, 
+              state=self.scale_widgets_state)
     self.entry_ymax.grid(row=2, column=5, padx=5)
 
   def toggle_autoscale(self):
@@ -204,19 +211,22 @@ class MainInterFace:
   def toggle_alarm(self):
     # Toggle autoscale for plot
     if self.btn_alarm.config('text')[-1] == "Alarma":
-      self.btn_alarm.config(text="Alarma Activa", bg="green", fg="white")
+      self.btn_alarm.config(text="Activa", bg="green", fg="white")
       self.enable_process.set()
-      self.data_process = DataAlarm(self.queue_process, 
-                          self.enable_process, self.alarm_threshold)
+      self.data_process = DataAlarm(
+                                    self.queue_process, 
+                                    self.enable_process, 
+                                    self.alarm_threshold,
+                                    self.shared_alarms
+                                    )
       self.data_process.start()
     else:
       self.btn_alarm.config(text="Alarma", bg=self.hex_color, fg="black")
-      self.data_adquisition.enable_process.clear()
-      self.data_process.run_event.clear()
+      self.enable_process.clear()  # Señala a DataSaver que debe salir
       if self.data_process is not None:
-        self.enable_process.clear()  # Señala a DataSaver que debe salir
         self.data_process.join()       # Espera a que finalice
         self.data_process = None
+      #self.manager.shutdown()  # Cerrar el Manager al detener el proceso
 
   def toggle_save(self):
     # Toggle autoscale for plot
@@ -229,10 +239,8 @@ class MainInterFace:
       self.data_saver.start()
     else:
       self.btn_save.config(text="Guardar", bg=self.hex_color, fg="black")
-      self.data_adquisition.enable_save.clear()
-      self.data_saver.run_event.clear()
+      self.enable_save.clear()  # Señala a DataSaver que debe salir
       if self.data_saver is not None:
-        self.enable_save.clear()  # Señala a DataSaver que debe salir
         self.data_saver.join()       # Espera a que finalice
         self.data_saver = None
 
@@ -267,12 +275,13 @@ class MainInterFace:
     # Preparación de datos para pcolormesh (necesitan ser 2D)
     x_edges = np.array([0.8, 1.2])  # Bordes en X (debe tener 1 elemento más que la dimensión de los datos)
     y_edges = np.linspace(0.3, 10.8, 11)  # 11 bordes para 10 celdas verticales
-    X, Y = np.meshgrid(x_edges, y_edges)  # Crear mallas para pcolormesh
-    Z = np.array([[0],[0],[0],[0],[1],[1],[0],[0],[1],[0]])
+    self.X_alarm, self.Y_alarm = np.meshgrid(x_edges, y_edges)  # Crear mallas para pcolormesh
+    Z_alarm = np.array([[0],[0],[0],[0],[0],[0],[0],[0],[0],[0]])
 
     for i in range(3):
       # Crear el gráfico de mapa de colores
-      mesh = self.ax2[i].pcolormesh(X, Y, Z, shading='flat', cmap=cmap1)
+      self.ax2[i].pcolormesh( self.X_alarm, self.Y_alarm, Z_alarm, 
+                              shading='flat', cmap=cmap1)
       
       # Configuración de ejes (similar al original)
       self.ax2[i].set_ylabel(f"Cuerpo {i+1}")
@@ -323,52 +332,105 @@ class MainInterFace:
           except Empty:
             break
     self.canvas.draw() 
-  
+
+  def update_alarm_plot(self):
+    try:
+      # Leer directamente de la variable compartida
+      alarms_data = {
+        0: self.shared_alarms[0],
+        1: self.shared_alarms[1],
+        2: self.shared_alarms[2]
+      }
+      #alarms_data = {
+      #    0: np.random.randint(0, 2, size=(10, 1)),  # Valores 0 o 1
+      #    1: np.random.randint(0, 2, size=(10, 1)),
+      #    2: np.random.randint(0, 2, size=(10, 1))
+      #}
+      
+      # Actualizar los 3 subplots de alarmas
+      for i in range(3):
+        # Limpiar solo el contenido del gráfico, no la configuración
+        for coll in self.ax2[2-i].collections:
+          coll.remove()
+        
+        # Crear nuevo gráfico con datos aleatorios
+        self.ax2[2-i].pcolormesh(
+          self.X_alarm,
+          self.Y_alarm, 
+          alarms_data[2-i],  # Usar datos aleatorios
+          shading='flat',
+          cmap=cmap1
+        )
+      self.canvas2.draw()
+    except Empty:
+      pass  # No hay datos en la cola, no hacer nada  
+    except Exception as e:
+      print(f"Error en update_alarm_plot: {e}")
+
   def update_plot_real_time(self):
+    
     self.update_plot()
+    if self.enable_process.is_set():
+      self.update_alarm_plot()
     self.root.after(33, self.update_plot_real_time)  
 
   def create_control_buttons(self):
     # Button toggles for various control actions
     self.btn_conect = tk.Button(self.control_frame, text="Conectar", bg=self.hex_color,
       command=self.toggle_conect, width=13,)
-    self.btn_conect.grid(row=0, column=0, padx=5, columnspan=3, sticky='ew')
+    self.btn_conect.grid(row=0, column=0, padx=5, columnspan=6, sticky='ew')
     # alarm --------------------------------------------------------------------
     self.btn_alarm = tk.Button(self.control_frame, text="Alarma", bg=self.hex_color,
-      command=self.toggle_alarm, width=13, )
-    self.btn_alarm.grid(row=1, column=0, padx=5)
+      command=self.toggle_alarm, width=7, )
+    self.btn_alarm.grid(row=1, column=0, padx=3)
 
-    self.label_alarm = tk.Label(self.control_frame, text="Umbral")
-    self.label_alarm.grid(row=1, column=1, padx=5)
-    self.entry_alarm = tk.Entry(self.control_frame, width=15, 
-      textvariable=self.alarm_threshold_tk)
+    # Configuración de los botones de ajuste de alarma
+    button_configs = [
+        {"text": "-5", "delta": -5, "column": 1, },
+        {"text": "-", "delta": -1, "column": 2,  },
+        {"text": "+", "delta": +1, "column": 4,  },
+        {"text": "+5", "delta": +5, "column": 5, }
+    ]
+
+    # Crear todos los botones de ajuste
+    for config in button_configs:
+      btn = tk.Button( self.control_frame, text=config["text"],
+        bg=self.hex_color,
+        command=lambda delta=config["delta"]: self.adj_alarm(delta),
+        width=4,
+      )
+      btn.grid(row=1, column=config["column"], padx=0)
+
+    #self.label_alarm = tk.Label(self.control_frame, text="Umbral")
+    #self.label_alarm.grid(row=1, column=3, padx=0)
+
+    vcmd = (self.root.register(validate_float_input), '%P')  # Registrar validación
+    self.entry_alarm = tk.Entry(self.control_frame, width=5, 
+                                textvariable=self.alarm_threshold_tk,
+                                #validate="key",
+                                #validatecommand=vcmd  
+                                )
     # Añadir un trace para actualizar la variable compartida
     self.alarm_threshold_tk.trace_add("write", self.update_alarm_threshold)
-    self.entry_alarm.grid(row=1, column=2, padx=5)
+    self.entry_alarm.grid(row=1, column=3, padx=5)
+    self.entry_alarm.config(state="disable")
 
     # save data ----------------------------------------------------------------
     self.btn_save = tk.Button(self.control_frame, text="Guardar", bg=self.hex_color,
-      command=self.toggle_save, width=13)
+      command=self.toggle_save, width=7)
     self.btn_save.grid(row=2, column=0, padx=5)
 
     self.label_save = tk.Label(self.control_frame, text="Archivo")
-    self.label_save.grid(row=2, column=1, padx=5)
+    self.label_save.grid(row=2, column=1, padx=5, columnspan=2)
     self.save_entry = tk.Entry(self.control_frame, width=15, textvariable=self.file_name)
-    self.save_entry.grid(row=2, column=2, pady=5)
+    self.save_entry.grid(row=2, column=3, pady=5, columnspan=3)
 
   def update_alarm_threshold(self, *args):
-    value = self.alarm_threshold_tk.get()
     try:
-        new_value = float(value) if value else 30.0  # Valor por defecto si está vacío
+        new_value = float(self.alarm_threshold_tk.get())
         self.alarm_threshold.value = new_value
     except ValueError:
         pass  # Ignora valores inválidos (no debería ocurrir gracias a la validación)
-
-  def toggle_button(btn, text_active, text_inactive):
-    if btn.config('text')[-1] == text_inactive:
-      btn.config(text=text_active, bg="green", fg="white")
-    else:
-      btn.config(text=text_inactive, bg=self.hex_color, fg="black")
       
   def create_image_display(self):
     # Display static image in the right frame
@@ -381,6 +443,9 @@ class MainInterFace:
     img_label.pack(side=tk.TOP, pady=2)
     img_label.image = img
 
+  def adj_alarm(self, delta):
+    current_value = self.alarm_threshold_tk.get()
+    self.alarm_threshold_tk.set(current_value + delta)
 if __name__ == "__main__":
   multiprocessing.freeze_support()
   root = tk.Tk()

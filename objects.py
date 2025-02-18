@@ -267,18 +267,19 @@ class DataSaver(Process):
 # Proceso de Alarma de Datos
 # =============================================================================
 class DataAlarm(Process):
-	def __init__(self, queue_alarm, run_event, threshold):
+	def __init__(self, queue_alarm, run_event, threshold, alarms):
 		super().__init__()
 		self.queue = queue_alarm
 		self.run_event = run_event
 		self.data = None
 		self.threshold = threshold
+		self.alarms = alarms
 		
 	def run(self):
-		print("state data save", self.run_event.is_set())
+		print("Alarm process is run ", self.run_event.is_set())
 		while self.run_event.is_set():
 			current_threshold = self.threshold.value
-			print(f"Alarm active, Thnreshokd {current_threshold}")
+			print(f"Alarm active, threshold {current_threshold}")
 			try:
 				# Procesa todos los datos disponibles en la cola sin bloquear
 				while not self.queue.empty():
@@ -308,10 +309,17 @@ class DataAlarm(Process):
 
 						# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
 						eval_alarmas = ymax > (rms + current_threshold)
-						self.alarms = eval_alarmas*1
-
+						alarms = eval_alarmas*1
+						alarms = alarms.reshape((len(alarms), 1))
+						self.alarms.update({
+								0: alarms[:10, :],
+								1: alarms[10:20],
+								2: alarms[20:]
+						})
+						#self.queue_alarm_plot.put(self.alarms)
+						#print("alarms shape", self.alarms[0].shape)
 						# 3. ACCIÓN EN CASO DE ALARMA
-						if any(eval_alarmas):  # Si se detecta una alarma
+						if any(eval_alarmas):  # Si se detecta una alarma						
 							try:
 								frequency = 2000  # Frecuencia del sonido de alarma en Hz
 								duration = 800  # Duración del sonido en milisegundos
