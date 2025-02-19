@@ -279,7 +279,7 @@ class DataAlarm(Process):
 		print("Alarm process is run ", self.run_event.is_set())
 		while self.run_event.is_set():
 			current_threshold = self.threshold.value
-			print(f"Alarm active, threshold {current_threshold}")
+			#print(f"Alarm active, threshold {current_threshold}")
 			try:
 				# Procesa todos los datos disponibles en la cola sin bloquear
 				while not self.queue.empty():

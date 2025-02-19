@@ -3,31 +3,16 @@ import tkinter as tk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from PIL import Image, ImageTk
 import numpy as np
-import matplotlib.pyplot as plt
+
 from tkinter import font, ttk
 # procesamiento de datos
 import multiprocessing
-from multiprocessing import Process, Queue, Event
+from multiprocessing import Process, Queue, Event, Manager
 from queue import Empty  # Para capturar la excepción en get(timeout=...)
 from objects import DataAdquisition, DataSaver, DataAlarm
-from matplotlib.colors import LinearSegmentedColormap
-colors = [(0,    (1, 1, 1)),       # Green
-          (1,    (1,     0, 0))]      # red
-cmap1 = LinearSegmentedColormap.from_list('custom_cmap', colors, 
-                                          N=2
-                                          )
+from functions import *
+
 #%%
-
-# En create_control_buttons (definir validación)
-def validate_float_input(new_val):
-    if new_val in ("", "-", ".", "-."):
-        return True  # Permite borrar o empezar a escribir
-    try:
-        float(new_val)
-        return True
-    except ValueError:
-        return False
-
 class MainInterFace:
   def __init__(self, root):
     # Initialize main window and configure fonts
@@ -49,7 +34,7 @@ class MainInterFace:
     self.enable_save = Event()
     self.enable_plot = Event()
     self.enable_process = Event()
-    self.manager = multiprocessing.Manager()
+    self.manager = Manager()
     self.shared_alarms = self.manager.dict()  # Diccionario compartido
     self.shared_alarms.update({
         0: np.array([[0]] * 10),  # 10 sensores, valor inicial 0
@@ -108,16 +93,16 @@ class MainInterFace:
     self.plot_graf_alarm = tk.Frame(self.plot_frame)
     self.plot_graf_alarm.pack(side=tk.RIGHT, pady=7, padx=3)
 
-    self.image_frame = tk.Frame(self.right_frame)
-    self.image_frame.pack(side=tk.TOP, pady=5)
-
     self.control_frame = tk.Frame(self.right_frame)
     self.control_frame.pack(side=tk.TOP, pady=5)
+
+    self.image_frame = tk.Frame(self.right_frame)
+    self.image_frame.pack(side=tk.TOP, pady=5)
 
   def create_plot_controls(self):
     # Control for selecting plot type
     ttk.Combobox(self.plot_data_frame, textvariable=self.plot_type, 
-                  values=["Señales", "Colormap"], state="readonly").grid(
+                  values=["Scan A", "Scan C"], state="readonly").grid(
                     row=0, column=0, columnspan=2, padx=5)
 
     # Time window control
@@ -146,6 +131,50 @@ class MainInterFace:
               textvariable=self.mag_max, 
               state=self.scale_widgets_state)
     self.entry_ymax.grid(row=2, column=5, padx=5)
+
+  def create_control_buttons(self):
+    # Button toggles for various control actions
+    self.btn_conect = tk.Button(self.control_frame, text="Conectar", bg=self.hex_color,
+      command=self.toggle_conect, width=13,)
+    self.btn_conect.grid(row=0, column=0, padx=5, columnspan=6, sticky='ew')
+    # alarm --------------------------------------------------------------------
+    self.btn_alarm = tk.Button(self.control_frame, text="Alarma", bg=self.hex_color,
+      command=self.toggle_alarm, width=9, )
+    self.btn_alarm.grid(row=1, column=0, padx=3)
+
+    # Configuración de los botones de ajuste de alarma
+    button_configs = [
+        {"text": "-5", "delta": -5, "column": 1, },
+        {"text": "-1", "delta": -1, "column": 2, },
+        {"text": "+1", "delta": +1, "column": 4, },
+        {"text": "+5", "delta": +5, "column": 5, }
+    ]
+
+    # Crear todos los botones de ajuste
+    for config in button_configs:
+      btn = tk.Button( self.control_frame, text=config["text"],
+        bg=self.hex_color,
+        command=lambda delta=float(config["text"]): self.adj_alarm(delta),
+        width=4,
+      )
+      btn.grid(row=1, column=config["column"], padx=0)
+
+    self.entry_alarm = tk.Entry(self.control_frame, width=5, 
+                                textvariable=self.alarm_threshold_tk)
+    # Añadir un trace para actualizar la variable compartida
+    self.alarm_threshold_tk.trace_add("write", self.update_alarm_threshold)
+    self.entry_alarm.grid(row=1, column=3, padx=5)
+    self.entry_alarm.config(state="disable")
+
+    # save data ----------------------------------------------------------------
+    self.btn_save = tk.Button(self.control_frame, text="Guardar", bg=self.hex_color,
+      command=self.toggle_save, width=9)
+    self.btn_save.grid(row=2, column=0, padx=5)
+
+    self.label_save = tk.Label(self.control_frame, text="Archivo")
+    self.label_save.grid(row=2, column=1, padx=5, columnspan=2)
+    self.save_entry = tk.Entry(self.control_frame, width=15, textvariable=self.file_name)
+    self.save_entry.grid(row=2, column=3, pady=5, columnspan=3)
 
   def toggle_autoscale(self):
     # Toggle autoscale for plot
@@ -211,7 +240,7 @@ class MainInterFace:
   def toggle_alarm(self):
     # Toggle autoscale for plot
     if self.btn_alarm.config('text')[-1] == "Alarma":
-      self.btn_alarm.config(text="Activa", bg="green", fg="white")
+      self.btn_alarm.config(text="Al. Activa", bg="green", fg="white")
       self.enable_process.set()
       self.data_process = DataAlarm(
                                     self.queue_process, 
@@ -245,21 +274,8 @@ class MainInterFace:
         self.data_saver = None
 
   def create_plot_area(self):
-    # Setup plot area with subplots
-    self.fig, self.ax = plt.subplots(3, 1, 
-                                     figsize=(6, 4), dpi=150, sharex=True)
-    self.fig.subplots_adjust(left=0.12, right=0.86, top=0.93, 
-                             bottom=0.1, hspace=0.07)
-    
-    self.ax[2].set_xlabel("tiempo [s]")
-    for i in range(3):
-      #self.ax[i].plot(t, signals.T)
-      self.ax[2-i].set_ylabel(f"Cuerpo {i+1}")
-      self.ax[2-i].set_ylim([self.mag_min.get(), self.mag_max.get()])
-    self.ax[0].set_xlim([0, self.time_scale.get()])
-    # Adding legend to axis 0, one label per row
-    self.ax[0].legend(self.labels, loc='upper right', 
-                bbox_to_anchor=(1.19, 0.5),  ncol=1, )
+    self.fig, self.ax = ScanA_create(
+      self.mag_min.get(),  self.mag_max.get(), self.time_scale.get())
 
     self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_graf_frame)
     self.canvas.draw()
@@ -267,34 +283,7 @@ class MainInterFace:
 
   def create_alarm_area(self):
     # Configuración de la figura y ejes
-    self.fig2, self.ax2 = plt.subplots(3, 1, figsize=(1, 4), 
-                                      dpi=150, sharex=True)
-    self.fig2.subplots_adjust(left=0.3, right=0.9, top=0.93, 
-                              bottom=0.1, hspace=0.007)
-
-    # Preparación de datos para pcolormesh (necesitan ser 2D)
-    x_edges = np.array([0.8, 1.2])  # Bordes en X (debe tener 1 elemento más que la dimensión de los datos)
-    y_edges = np.linspace(0.3, 10.8, 11)  # 11 bordes para 10 celdas verticales
-    self.X_alarm, self.Y_alarm = np.meshgrid(x_edges, y_edges)  # Crear mallas para pcolormesh
-    Z_alarm = np.array([[0],[0],[0],[0],[0],[0],[0],[0],[0],[0]])
-
-    for i in range(3):
-      # Crear el gráfico de mapa de colores
-      self.ax2[i].pcolormesh( self.X_alarm, self.Y_alarm, Z_alarm, 
-                              shading='flat', cmap=cmap1)
-      
-      # Configuración de ejes (similar al original)
-      self.ax2[i].set_ylabel(f"Cuerpo {i+1}")
-      self.ax2[i].set_ylim([0.3, 10.8])
-      self.ax2[i].set_yticks(np.linspace(1, 10, 10))  # Centros de las celdas
-      self.ax2[i].set_yticklabels(self.labels, fontsize=8)
-    self.ax2[i].set_xlim([0.8, 1.2])
-    self.ax2[i].set_xticks([1])  # Centros de las celdas
-    self.ax2[i].set_xticklabels([])  # Centros de las celdas
-    self.ax2[i].set_xlabel("Alarmas")  # Centros de las celdas
-
-    #self.ax2[i].set_yticklabels(self.labels, fontsize=8)
-
+    self.fig2, self.ax2, self.X_alarm, self.Y_alarm = Alarm_create()
 
     self.canvas2 = FigureCanvasTkAgg(self.fig2, master=self.plot_graf_alarm)
     self.canvas2.draw()
@@ -316,19 +305,10 @@ class MainInterFace:
               self.data_plot = np.vstack((self.data_plot, data_array))
             if len(self.data_plot) > max_samples:
               self.data_plot = self.data_plot[-max_samples:]
-            len_data = len(self.data_plot)
-            t = np.linspace(0, len_data-1, num=len_data)/self.sampling_rate
-            for i in range(3):
-              while self.ax[2-i].lines:
-                self.ax[2-i].lines[0].remove()
-              self.ax[2-i].plot(t, self.data_plot[:, i*10: (i+1)*10])
-              self.ax[2-i].set_xlim([0, self.time_scale.get()])
-              if self.auto_scale==1:
-                self.ax[2-i].set_ylim([self.data_plot.min(), self.data_plot.max()])
-              else:
-                self.ax[2-i].set_ylim([self.mag_min.get(), self.mag_max.get()])
-            self.ax[0].legend(labels, loc='upper right', 
-              bbox_to_anchor=(1.19, 0.5),  ncol=1, )
+            self.ax = ScanA_update(self.ax, 
+              self.mag_min.get(), self.mag_max.get(), self.time_scale.get(), 
+              self.data_plot, self.sampling_rate, self.auto_scale
+            )
           except Empty:
             break
     self.canvas.draw() 
@@ -336,31 +316,14 @@ class MainInterFace:
   def update_alarm_plot(self):
     try:
       # Leer directamente de la variable compartida
-      alarms_data = {
-        0: self.shared_alarms[0],
-        1: self.shared_alarms[1],
-        2: self.shared_alarms[2]
-      }
       #alarms_data = {
-      #    0: np.random.randint(0, 2, size=(10, 1)),  # Valores 0 o 1
-      #    1: np.random.randint(0, 2, size=(10, 1)),
-      #    2: np.random.randint(0, 2, size=(10, 1))
+      #  0: self.shared_alarms[0],
+      #  1: self.shared_alarms[1],
+      #  2: self.shared_alarms[2]
       #}
       
-      # Actualizar los 3 subplots de alarmas
-      for i in range(3):
-        # Limpiar solo el contenido del gráfico, no la configuración
-        for coll in self.ax2[2-i].collections:
-          coll.remove()
-        
-        # Crear nuevo gráfico con datos aleatorios
-        self.ax2[2-i].pcolormesh(
-          self.X_alarm,
-          self.Y_alarm, 
-          alarms_data[2-i],  # Usar datos aleatorios
-          shading='flat',
-          cmap=cmap1
-        )
+      self.ax2 = Alarm_update(self.ax2, self.X_alarm, self.Y_alarm,
+        self.shared_alarms)
       self.canvas2.draw()
     except Empty:
       pass  # No hay datos en la cola, no hacer nada  
@@ -373,57 +336,6 @@ class MainInterFace:
     if self.enable_process.is_set():
       self.update_alarm_plot()
     self.root.after(33, self.update_plot_real_time)  
-
-  def create_control_buttons(self):
-    # Button toggles for various control actions
-    self.btn_conect = tk.Button(self.control_frame, text="Conectar", bg=self.hex_color,
-      command=self.toggle_conect, width=13,)
-    self.btn_conect.grid(row=0, column=0, padx=5, columnspan=6, sticky='ew')
-    # alarm --------------------------------------------------------------------
-    self.btn_alarm = tk.Button(self.control_frame, text="Alarma", bg=self.hex_color,
-      command=self.toggle_alarm, width=7, )
-    self.btn_alarm.grid(row=1, column=0, padx=3)
-
-    # Configuración de los botones de ajuste de alarma
-    button_configs = [
-        {"text": "-5", "delta": -5, "column": 1, },
-        {"text": "-", "delta": -1, "column": 2,  },
-        {"text": "+", "delta": +1, "column": 4,  },
-        {"text": "+5", "delta": +5, "column": 5, }
-    ]
-
-    # Crear todos los botones de ajuste
-    for config in button_configs:
-      btn = tk.Button( self.control_frame, text=config["text"],
-        bg=self.hex_color,
-        command=lambda delta=config["delta"]: self.adj_alarm(delta),
-        width=4,
-      )
-      btn.grid(row=1, column=config["column"], padx=0)
-
-    #self.label_alarm = tk.Label(self.control_frame, text="Umbral")
-    #self.label_alarm.grid(row=1, column=3, padx=0)
-
-    vcmd = (self.root.register(validate_float_input), '%P')  # Registrar validación
-    self.entry_alarm = tk.Entry(self.control_frame, width=5, 
-                                textvariable=self.alarm_threshold_tk,
-                                #validate="key",
-                                #validatecommand=vcmd  
-                                )
-    # Añadir un trace para actualizar la variable compartida
-    self.alarm_threshold_tk.trace_add("write", self.update_alarm_threshold)
-    self.entry_alarm.grid(row=1, column=3, padx=5)
-    self.entry_alarm.config(state="disable")
-
-    # save data ----------------------------------------------------------------
-    self.btn_save = tk.Button(self.control_frame, text="Guardar", bg=self.hex_color,
-      command=self.toggle_save, width=7)
-    self.btn_save.grid(row=2, column=0, padx=5)
-
-    self.label_save = tk.Label(self.control_frame, text="Archivo")
-    self.label_save.grid(row=2, column=1, padx=5, columnspan=2)
-    self.save_entry = tk.Entry(self.control_frame, width=15, textvariable=self.file_name)
-    self.save_entry.grid(row=2, column=3, pady=5, columnspan=3)
 
   def update_alarm_threshold(self, *args):
     try:
