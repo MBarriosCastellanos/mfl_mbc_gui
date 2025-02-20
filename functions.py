@@ -53,18 +53,8 @@ def ScanA_update(fig, ax, y_min, y_max, t_max, data, sampling_rate, auto_scale):
 # Scan C
 # =============================================================================
 def ScanC_create(z_min, z_max, t_max):
-  # Generar datos de tiempo y valores y
-  #n_time = 1500  # Número de puntos en el tiempo
   n_y = 10     # Número de puntos en el eje y
-  #t = np.linspace(0, t_max, n_time)
   y = np.linspace(1, 10, n_y)
-  #X, Y = np.meshgrid(t, y)  # Crear mallas para las coordenadas
-  
-  # Niveles de contorno basados en z_min y z_max
-  #contour_levels = np.linspace(z_min, z_max, num=15)
-  #Z = np.ones((n_y, n_time))*z_min
-  
-  # Configurar gráficos
   fig, ax = plt.subplots(3, 1, figsize=(6, 4), dpi=150, sharex=True)
   fig.subplots_adjust(left=0.10, right=0.99, top=0.98, bottom=0.10, 
     hspace=0.04)
@@ -75,10 +65,6 @@ def ScanC_create(z_min, z_max, t_max):
     ax[2 - i].set_ylim([0.5, 10.5])
     ax[2 - i].set_yticks(y)
     ax[2 - i].set_yticklabels(labels)
-  
-  #ax[0].set_xlim([0, t_max])
-  
-
   return fig, ax
 
 def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
@@ -97,13 +83,13 @@ def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
   else:
     vmin, vmax = sorted([z_min, z_max])
 
-  # --- Corrección clave: Definir boundaries y norm correctamente ---
+  # Asegurar que haya al menos 2 valores distintos para evitar errores
+  if vmin == vmax:
+      vmax += 1e-6  # Pequeño incremento para evitar colapso
+
   num_colors = 7  # Debe coincidir con N=7 del cmap2
   boundaries = np.linspace(vmin, vmax, num=num_colors + 1)  # 8 límites para 7 colores
   norm = BoundaryNorm(boundaries=boundaries, ncolors=num_colors)  # ncolors=7
-
-  # Determinar niveles dinámicos
-  #cl = np.linspace(vmin, vmax, 7)
 
   # Ajustar datos si es necesario
   data = data[:, :cuerpos*M]  # Truncar a máximo de columnas esperadas
@@ -119,40 +105,11 @@ def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
       coll.remove()
 
     # Dibujar nuevos contornos
-    cs = ax[2-i].contourf(X, Y, Z, cmap=cmap2, alpha=0.9, norm=norm,
-      #levels=cl,
-      #vmin=vmin, vmax=vmax
-      )
+    cs = ax[2-i].contourf(X, Y, Z, cmap=cmap2, alpha=0.9, norm=norm)
     mappables.append(cs)  # Guardar referencia al último mappable
 
   ax[0].set_xlim([0, t.max()])
-  b_labels = [int(i) for i in boundaries]
-
-  #if hasattr(fig, 'cbar'):
-    #fig.cbar.remove()  # Eliminar colorbar anterior
-    #fig.cbar.update_normal(cs)  # Sincronizar con el nuevo mappable
-    #fig.cbar.mappable.set_clim(vmin=vmin, vmax=vmax)
-    #fig.cbar.mappable.set_norm(norm)
-    #fig.cbar.set_ticks(boundaries) 
-    #fig.cbar.set_ticklabels([f"{int(x)}" for x in boundaries])
-    #fig.cbar.formatter("{x:.0ef}")
-    #fig.cbar._draw_all()
-  #else:
-    #fig.cbar = fig.colorbar(cs, ax=ax, orientation='vertical', pad=0.05)
-    #fig.cbar.mappable.set_clim(vmin=vmin, vmax=vmax)
-    #fig.cbar.set_ticks(boundaries)
-    #fig.cbar.set_ticklabels([f"{int(x)}" for x in boundaries])
-    #fig.cbar.formatter("{x:.0ef}")
-    #fig.cbar._draw_all()
-
-  # Crear nueva colorbar usando el último mappable válido
-  #fig.cbar = fig.colorbar(mappables[-1], ax=ax, orientation='vertical', pad=0.05)
-  #fig.cbar.set_ticks(boundaries)
-  #fig.cbar.set_ticklabels([f"{x:.0f}" for x in boundaries])
   
-  # Forzar actualización de la figura
-  #fig.canvas.draw()
-
   return fig, ax
 
 # =============================================================================
