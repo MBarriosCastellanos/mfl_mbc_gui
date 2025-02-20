@@ -49,7 +49,7 @@ class MainInterFace:
     self.mag_min = tk.DoubleVar(value=2000)
     self.mag_max = tk.DoubleVar(value=3000)
     self.file_name = tk.StringVar(value="")
-    self.plot_type = tk.StringVar(value="Señales")
+    self.plot_type = tk.StringVar(value="Scan A")
     self.sampling_rate = 300
     self.auto_scale = 1
     self.hex_color = "#CDCDCD"  # Default button color
@@ -62,8 +62,8 @@ class MainInterFace:
     # Set up the main GUI layout
     self.create_frames()
     self.create_plot_controls()
-    self.create_plot_area()
-    self.create_alarm_area()
+    self.create_plot_main()
+    self.create_alarm_alarm()
     self.create_control_buttons()
     self.create_image_display()
 
@@ -273,7 +273,7 @@ class MainInterFace:
         self.data_saver.join()       # Espera a que finalice
         self.data_saver = None
 
-  def create_plot_area(self):
+  def create_plot_main(self):
     self.fig, self.ax = ScanA_create(
       self.mag_min.get(),  self.mag_max.get(), self.time_scale.get())
 
@@ -281,7 +281,7 @@ class MainInterFace:
     self.canvas.draw()
     self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
-  def create_alarm_area(self):
+  def create_alarm_alarm(self):
     # Configuración de la figura y ejes
     self.fig2, self.ax2, self.X_alarm, self.Y_alarm = Alarm_create()
 
@@ -289,31 +289,31 @@ class MainInterFace:
     self.canvas2.draw()
     self.canvas2.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
-  def update_plot(self):
+  def update_plot_main(self):
     labels = [f's{i+1}' for i in range(10)]
     if self.queue_plot is not None:
       while True:
-          try:
-            data = self.queue_plot.get_nowait()
-            data_array = np.column_stack(
-                [np.array(data[key])[-10:] for key in sorted(data.keys())]
-            )
-            max_samples = self.time_scale.get() * self.sampling_rate
-            if self.data_plot is None:
-              self.data_plot = data_array
-            else:
-              self.data_plot = np.vstack((self.data_plot, data_array))
-            if len(self.data_plot) > max_samples:
-              self.data_plot = self.data_plot[-max_samples:]
-            self.ax = ScanA_update(self.ax, 
-              self.mag_min.get(), self.mag_max.get(), self.time_scale.get(), 
-              self.data_plot, self.sampling_rate, self.auto_scale
-            )
-          except Empty:
-            break
+        try:
+          data = self.queue_plot.get_nowait()
+          data_array = np.column_stack(
+              [np.array(data[key])[-10:] for key in sorted(data.keys())]
+          )
+          max_samples = self.time_scale.get() * self.sampling_rate
+          if self.data_plot is None:
+            self.data_plot = data_array
+          else:
+            self.data_plot = np.vstack((self.data_plot, data_array))
+          if len(self.data_plot) > max_samples:
+            self.data_plot = self.data_plot[-max_samples:]
+          self.fig, self.ax = ScanA_update(self.fig, self.ax, 
+            self.mag_min.get(), self.mag_max.get(), self.time_scale.get(), 
+            self.data_plot, self.sampling_rate, self.auto_scale
+          )
+        except Empty:
+          break
     self.canvas.draw() 
 
-  def update_alarm_plot(self):
+  def update_plot_alarm(self):
     try:
       # Leer directamente de la variable compartida
       #alarms_data = {
@@ -328,13 +328,13 @@ class MainInterFace:
     except Empty:
       pass  # No hay datos en la cola, no hacer nada  
     except Exception as e:
-      print(f"Error en update_alarm_plot: {e}")
+      print(f"Error en update_plot_alarm: {e}")
 
   def update_plot_real_time(self):
     
-    self.update_plot()
+    self.update_plot_main()
     if self.enable_process.is_set():
-      self.update_alarm_plot()
+      self.update_plot_alarm()
     self.root.after(33, self.update_plot_real_time)  
 
   def update_alarm_threshold(self, *args):
