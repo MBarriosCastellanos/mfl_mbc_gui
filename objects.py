@@ -49,8 +49,10 @@ class DataAdquisition(Process):
 		:param queue_save: Cola para enviar datos al proceso de guardado.
 		:param queue_plot: Cola para enviar datos al proceso de plot.
 		:param stop_event: Evento para detener el proceso.
-		:param enable_save: Si True se activará los datos para guarar.
-		:param enable_plot: Si True se activará el plot en tiempo real."""
+		:param enable_save: Si True se activará los datos para guardar.
+		:param enable_plot: Si True se activará el plot en tiempo real.
+		:param enable_process: Si True se activará el procesamiento de los datos.
+		"""
 		super().__init__()
 		self.queue_save = queue_save        # Fila para guardar los datos
 		self.queue_plot = queue_plot        # Fila para plotar los datos
@@ -83,51 +85,50 @@ class DataAdquisition(Process):
 		self.serial_connections = []            # buffers para almecenamiento
 		for port in ports_orig:                 # puertos disponibles
 			try:                                  # intente abrir los puertos
-				comm = serial.Serial(               # 
-					port=port,
-					baudrate=self.baudrate,
-					parity=serial.PARITY_NONE,
-					stopbits=serial.STOPBITS_ONE,
-					bytesize=serial.EIGHTBITS,
-					timeout=0.1
+				comm = serial.Serial(               #  abrir el puerto
+					port=port,												#  puerto					
+					baudrate=self.baudrate,						#  velocidad de transmisión
+					parity=serial.PARITY_NONE,				#  paridad
+					stopbits=serial.STOPBITS_ONE,			#  bits de parada
+					bytesize=serial.EIGHTBITS,				#	tamaño de los bytes	
+					timeout=0.1												#  tiempo de espera										
 				)
-				self.serial_connections.append(comm)
-				self.ports.append(port)
+				self.serial_connections.append(comm) 	#	añadir la conexión
+				self.ports.append(port)								# añadir el puerto
 				print(f"Puerto {port} abierto exitosamente.")
-			except Exception as e:
+			except Exception as e:					# si no se puede abrir el puerto
 				print(f"No se pudo abrir el puerto {port}: {e}")
 		self.buffers = [bytearray() for _ in self.ports]
 
 	def close_serial_ports(self):
 		"""Cierra todas las conexiones serial."""
-		for comm in self.serial_connections:
-			comm.close()
+		for comm in self.serial_connections:		# para cada conexión
+			comm.close()													# cerrar la conexión
 			print(f"Puerto {comm.port} cerrado exitosamente.")
 
 	def decode_serial_message(self, message):
 		"""Decodifica el mensaje binario recibido."""
-		value = struct.unpack(self.bin_msm_format, message)
-		# Se retornan los 10 primeros valores y el valor entero del último campo (cuerpo)
-		return list(value[:10]), int(value[12])
+		value = struct.unpack(self.bin_msm_format, message)	# decodificar el mensaje
+		return list(value[:10]), int(value[12])	# retornar los valores y el cuerpo
 
 	def read_port_data(self, i):
 		"""
 		Lee datos del puerto i y busca el delimitador b';****' 
 		para extraer un mensaje completo.
 		"""
-		comm = self.serial_connections[i]
-		data = comm.read(comm.in_waiting or self.msm_size)
-		self.buffers[i].extend(data)
-		end = self.buffers[i].find(b";****")
-		values, body = None, None
-		if end >= 0:
-			message = self.buffers[i][:end]
-			# Actualizamos el buffer eliminando el mensaje leído 
-			# y el delimitador
-			self.buffers[i] = self.buffers[i][end + len(b";****"):]
-			if len(message) == self.msm_size - len(b";****"):
-				return self.decode_serial_message(message)
-		return values, body
+		comm = self.serial_connections[i]										# conexión serial
+		data = comm.read(comm.in_waiting or self.msm_size)	# leer los datos
+		self.buffers[i].extend(data)												# añadir los datos al buffer
+		end = self.buffers[i].find(b";****")							# buscar el delimitador				
+		values, body = None, None													# valores y cuerpo
+		if end >= 0:																			# si se encuentra el delimitador
+			message = self.buffers[i][:end]									# extraer el mensaje
+			# Actualizamos el buffer eliminando el mensaje leído y el delimitador
+			self.buffers[i] = self.buffers[i][end + len(b";****"):]	# actualizar el buffer
+			if len(message) == self.msm_size - len(b";****"):	# si el mensaje tiene el tamaño correcto
+				# decodificar el mensaje y retornar  los valores y el cuerpo
+				return self.decode_serial_message(message)		
+		return values, body	  # retornar los valores y el cuerpo como None
 
 	def identify_comm_mfl(self):
 		"""
@@ -135,31 +136,31 @@ class DataAdquisition(Process):
 		hasta obtener 3 identificaciones.Se espera que cada mensaje incluya en 
 		el campo 'body' la identificación del cuerpo.
 		"""
-		port_to_body = {}
-		max_attempts = 50
-		self.open_serial_ports()
+		port_to_body = {}					# diccionario de puerto a cuerpo
+		max_attempts = 50					# número máximo de intentos
+		self.open_serial_ports()	# abrir los puertos	
 
-		while len(port_to_body) < 3:
-			for i in range(len(self.ports)):
-				port = self.ports[i]
-				comm = self.serial_connections[i]
+		while len(port_to_body) < 3:	# mientras no se identifiquen los 3 cuerpos
+			for i in range(len(self.ports)):	# para cada puerto
+				port = self.ports[i]						# puerto
+				comm = self.serial_connections[i] # conexión
 				# Si el puerto ya fue asignado, se omite
-				if port in port_to_body.values():
-					continue
-				if len(port_to_body) >= 3:
-					break
-				attempts = 0
-				while attempts < max_attempts:
-					_ , body = self.read_port_data(i)
-					if body is not None:
-						port_to_body[body] = port
+				if port in port_to_body.values(): 	# si el puerto ya fue asignado	
+					continue													# continuar
+				if len(port_to_body) >= 3:	# si ya se identificaron los 3 cuerpos
+					break															# salir										
+				attempts = 0								# intentos
+				while attempts < max_attempts:    # mientras no se alcance el número máximo de intentos
+					_ , body = self.read_port_data(i) # leer los datos del puerto
+					if body is not None:					# si se identifica el cuerpo
+						port_to_body[body] = port				# añadir el puerto al diccionario
 						print(f"El puerto {port} corresponde al cuerpo {body + 1}")
-						comm.close()
-						break
-					attempts += 1
+						comm.close()										# cerrar la conexión
+						break														# salir									
+					attempts += 1									# incrementar los intentos
 					if attempts == max_attempts and port not in port_to_body.values():
-						print(f"No se pudo identificar un cuerpo para el puerto \
-							{port} después de {max_attempts} intentos.")
+						print("No se pudo identificar un cuerpo para el puerto" + \
+							f"{port} después de {max_attempts} intentos.")
 			# Ordenamos los puertos según la identificación de cada cuerpo
 			self.ports = [port_to_body[i] for i in sorted(port_to_body.keys())]
 			print(f"Los puertos identificados en orden son {self.ports}")
@@ -169,57 +170,62 @@ class DataAdquisition(Process):
 		Lee continuamente de los puertos, acumula datos y, cuando se tiene 
 		suficiente, publica los datos en las colas para el guardado y el plot.
 		"""
-		n_ports = len(self.ports)
-		buffer_acquisition = {i: [] for i in range(n_ports)}
-		buffer_plot = {i: [] for i in range(n_ports)}
-		buffer_process = {i: [] for i in range(n_ports)}
+		n_ports = len(self.ports)				# número de puertos
+		buffer_acquisition = {i: [] for i in range(n_ports)}	# buffer de adquisición
+		buffer_plot = {i: [] for i in range(n_ports)}			# buffer de plot
+		buffer_process = {i: [] for i in range(n_ports)}	# buffer de procesamiento
 		
-		n_it = 0
-		start_time_loop = time.time()
+		#	Variables para el control de la publicación de datos
+		n_it = 0												# número de iteraciones
+		start_time_loop = time.time()		# tiempo de inicio del bucle
 
 		# Reabrir los puertos para la adquisición
-		self.open_serial_ports()
+		self.open_serial_ports()				# abrir los puertos
 
-		while not self.stop_event.is_set():
-			for i in range(n_ports):
-				values, body = self.read_port_data(i)
-				# Leer datos de cada puerto
-				if body is not None:
+		# Bucle principal de adquisición de datos
+		while not self.stop_event.is_set():	# mientras no se reciba la señal de paro
+			for i in range(n_ports):				# para cada puerto
+				values, body = self.read_port_data(i)  # Leer datos de cada puerto
+				if body is not None:					# si se identifica el cuerpo
 					# llenar las colas de datos paralelas
-					buffer_acquisition[body].append(values)
-					if self.enable_plot.is_set():
-						buffer_plot[body].append(values)
-					if self.enable_process.is_set():
-						buffer_process[body].append(values)
+					buffer_acquisition[body].append(values)	# añadir los valores al buffer de adquisición
+					if self.enable_plot.is_set():					# si se activa el plot
+						buffer_plot[body].append(values)		# añadir los valores al buffer de plot
+					if self.enable_process.is_set():			# si se activa el procesamiento
+						buffer_process[body].append(values)	# añadir los valores al buffer de procesamiento
 
-			self.queue_plot, buffer_plot, _ =  buffer_management(
-				buffer_plot, self.enable_plot, self.queue_plot, 10)
-			#print(f"Tamaño de queue_plot: {self.queue_plot.qsize()}") 
+			self.queue_plot, buffer_plot, _ =  buffer_management( # manejar el buffer de plot 
+				buffer_plot, self.enable_plot, self.queue_plot, 10)	#  con 10 datos
 
-			self.queue_process, buffer_process, _ =  buffer_management(
-				buffer_process, self.enable_process, self.queue_process, 1)
+			self.queue_process, buffer_process, _ =  buffer_management(		# manejar el buffer de procesamiento
+				buffer_process, self.enable_process, self.queue_process, 1)	# con 1 dato
 
-			self.queue_save, buffer_acquisition, n_it =  buffer_management(
-				buffer_acquisition, self.enable_save, self.queue_save, 300,
-				True, n_it, start_time_loop)
+			self.queue_save, buffer_acquisition, n_it =  buffer_management( # manejar el buffer de adquisición
+				buffer_acquisition, self.enable_save, self.queue_save, 300,   # con 300 datos
+				True, n_it, start_time_loop)																	# imprimir los datos
 
-			time.sleep(0.001)
-		self.close_serial_ports()
+			time.sleep(0.001)													# esperar 1 ms
+		self.close_serial_ports()										# cerrar los puertos
 
 	def run(self):
 		"""
 		Método principal del proceso: primero identifica los puertos asociados a cada cuerpo y luego
 		inicia el bucle de publicación de datos.
 		"""
-		self.identify_comm_mfl()
-		self.publish_data_loop()
+		self.identify_comm_mfl()									# identificar los puertos
+		self.publish_data_loop()									# publicar los datos
 
 # =============================================================================
 # Proceso de Guardado de Datos en CSV
 # =============================================================================
 class DataSaver(Process):
 	def __init__(self, queue_save, run_event, name=""):
-		""" Proceso que guarda en un archivo CSV los datos que recibe de la cola.
+		""" 
+		Proceso que guarda en un archivo CSV los datos que recibe de la cola.
+		:param queue_save: Cola de datos a guardar.
+		:param run_event: Evento para iniciar o detener el proceso.
+		:param name: Nombre del archivo CSV. Si no se especifica, 
+			se usará la fecha y hora actual.
 		"""
 		super().__init__()
 		self.queue_save = queue_save
@@ -260,125 +266,79 @@ class DataSaver(Process):
 
 			except Exception as e:
 				print(f"Esperando datos para guardar... {e}")
-		#if self.csv_file:
-		#	self.csv_file.close()
 
 # =============================================================================
 # Proceso de Alarma de Datos
 # =============================================================================
 class DataAlarm(Process):
 	def __init__(self, queue_alarm, run_event, threshold, alarms):
-		super().__init__()
-		self.queue = queue_alarm
-		self.run_event = run_event
-		self.data = None
-		self.threshold = threshold
-		self.alarms = alarms
+		"""
+		Proceso que detecta alarmas en los datos recibidos y emite un sonido.
+		:param queue_alarm: Cola de datos para procesar.
+		:param run_event: Evento para iniciar o detener el proceso.
+		:param threshold: Umbral para detectar alarmas.
+		:param alarms: Diccionario de alarmas detectadas.
+		"""
+		super().__init__()						# inicializar la clase
+		self.queue = queue_alarm			# cola de datos
+		self.run_event = run_event		# evento de ejecución
+		self.data = None							# datos
+		self.threshold = threshold		# umbral
+		self.alarms = alarms					# alarmas
 		
 	def run(self):
+		""" Método principal del proceso. """		
 		print("Alarm process is run ", self.run_event.is_set())
-		while self.run_event.is_set():
-			current_threshold = self.threshold.value
-			#print(f"Alarm active, threshold {current_threshold}")
-			try:
+		# mientras el evento de ejecución esté activo
+		while self.run_event.is_set():	
+			current_threshold = self.threshold.value	# umbral actual
+			try:												# intentar
 				# Procesa todos los datos disponibles en la cola sin bloquear
-				while not self.queue.empty():
-					data = self.queue.get_nowait()
-					try:
-						data_array = np.column_stack(
+				while not self.queue.empty(): # mientras la cola no esté vacía
+					data = self.queue.get_nowait() # obtener los datos
+					try:										# intentar 	
+						data_array = np.column_stack(	# concatenar los datos
 							[np.array(data[key]) for key in sorted(data.keys())])
-					except Exception as e:
+					except Exception as e:	# si hay un error
 						print(f"Error al concatenar datos: {e}")
 						continue
 
-					if self.data is None:
-						self.data = data_array
-					else:
+					if self.data is None:	# si no hay datos
+						self.data = data_array # asignar los datos
+					else:			# si hay datos empezar a concatenar
 						self.data = np.vstack((self.data, data_array))
 
 					# 1. CONSTRUCCIÓN DE LA MUESTRA DE DATOS
-					sample_size = 20 
-					if len(self.data) > sample_size:
-						self.data = self.data[-sample_size:, :]
+					sample_size = 20 						# tamaño de la muestra
+					if len(self.data) > sample_size:		# si la muestra es mayor al tamaño
+						self.data = self.data[-sample_size:, :] # reducir la muestra
 
  					# 2. PROCESAMIENTO DE LA MUESTRA SI ES SUFICIENTEMENTE GRANDE
-					if len(self.data) >= sample_size:    # Si se tiene el tamaño nesario de la 
+					if len(self.data) >= sample_size:    # Si se tiene el tamaño nesario de la muestra
 						# Convierte la muestra en un arreglo de NumPy para procesamiento
 						rms = np.sqrt(np.mean(self.data ** 2, axis=0))  # Calcula el RMS de cada sensor
 						ymax = np.max(self.data, axis=0)  # Encuentra los valores máximos de cada sensor
 
 						# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
-						eval_alarmas = ymax > (rms + current_threshold)
-						alarms = eval_alarmas*1
-						alarms = alarms.reshape((len(alarms), 1))
-						self.alarms.update({
-								0: alarms[:10, :],
-								1: alarms[10:20],
+						eval_alarmas = ymax > (rms + current_threshold)	# evaluar las alarmas
+						alarms = eval_alarmas*1												# convertir a 0 y 1
+						alarms = alarms.reshape((len(alarms), 1))			# redimensionar
+						self.alarms.update({		# separar las alarmas por cuerpo
+								0: alarms[:10, :],	# actualizar las alarmas
+								1: alarms[10:20],	
 								2: alarms[20:]
 						})
-						#self.queue_alarm_plot.put(self.alarms)
-						#print("alarms shape", self.alarms[0].shape)
 						# 3. ACCIÓN EN CASO DE ALARMA
 						if any(eval_alarmas):  # Si se detecta una alarma						
-							try:
+							try:									# intentar 
 								frequency = 2000  # Frecuencia del sonido de alarma en Hz
 								duration = 800  # Duración del sonido en milisegundos
 								winsound.Beep(frequency, duration)  # Genera el sonido
 								# Reduce la muestra a la mitad para evitar alarmas repetitivas
-								self.data = self.data[-10:]
-							except Exception as e:
+								self.data = self.data[-10:]	# reducir la muestra
+							except Exception as e:			# si hay un error
 								print(f"Error al emitir alarma sonora: {e}")
 
-			except Exception as e:
-				print(f"Error en update_plot: {e}")
+			except Exception as e:		# si hay un error
+				print(f"Error en update_plot: {e}")	# si hay un error
 
-# =============================================================================
-# Bloque principal
-# =============================================================================
-#if __name__ == "__main__":
-#	stop_event = Event()
-#	# Para que Windows (y otros sistemas) puedan iniciar correctamente los procesos.
-#	multiprocessing.freeze_support()
-#
-#	# Crear colas para compartir datos entre procesos
-#	queue_save = Queue()
-#	queue_plot = Queue()
-#	queue_process = Queue()
-#	threshold = 20
-#
-#	# Evento para señalizar el paro de todos los procesos
-#	enable_plot=Event() 
-#	enable_process=Event() 
-#	enable_save=Event()
-#	
-#	#enable_plot.set()
-#	enable_process.set()
-#	#enable_save.set()
-#
-#	# Crear e iniciar los procesos
-#	data_adquisition = DataAdquisition(queue_save, queue_plot, queue_process,
-#										stop_event=stop_event,
-#										enable_plot=enable_plot, 
-#										enable_process=enable_process, 
-#										enable_save=enable_save)
-#	data_process = DataAlarm(queue_process, enable_process, threshold)
-#	data_saver = DataSaver(queue_save, enable_save)
-#
-#	data_adquisition.start()
-#	data_process.start()
-#	#data_saver.start()
-#
-#	print("Procesos iniciados. Presiona Ctrl+C para detener.")
-#
-#	try:
-#		while not stop_event.is_set():
-#			time.sleep(0.003)
-#	except KeyboardInterrupt:
-#		print("Se recibió KeyboardInterrupt. Deteniendo procesos...")
-#		stop_event.set()
-#
-#	# Esperar a que todos los procesos finalicen
-#	data_adquisition.join()
-#	data_saver.join()
-#	data_plot.join()
-#	print("Todos los procesos han finalizado.")

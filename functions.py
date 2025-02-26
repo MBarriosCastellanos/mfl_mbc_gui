@@ -19,11 +19,17 @@ colors2 = [(0,    (0,    0.5, 0)),      # Green
 cmap2 = LinearSegmentedColormap.from_list('custom_cmap', colors2, 
                                           N=7
                                           )
+
 # =============================================================================
 # Scan A
 # =============================================================================
 def ScanA_create(y_min, y_max, t_max):
-  # Setup plot area with subplots
+  """
+  Crea la figura y los ejes para la visualización de Scan A.
+  y_min: Valor mínimo en el eje y
+  y_max: Valor máximo en el eje y
+  t_max: Valor máximo en el eje x (tiempo)
+  """
   fig, ax = plt.subplots(3, 1, figsize=(6, 4), dpi=150, sharex=True)
   fig.subplots_adjust(left=0.12, right=0.86, top=0.93, bottom=0.1, hspace=0.07)  
   ax[2].set_xlabel("tiempo [s]")
@@ -35,13 +41,29 @@ def ScanA_create(y_min, y_max, t_max):
   return fig, ax
 
 def ScanA_update(fig, ax, y_min, y_max, t_max, data, sampling_rate, auto_scale):
+  """
+  Actualiza la figura y los ejes para la visualización de Scan A.
+  fig: Figura creada previamente
+  ax: Ejes creados previamente
+  y_min: Valor mínimo en el eje y
+  y_max: Valor máximo en el eje y  
+  t_max: Valor máximo en el eje x (tiempo)
+  data: Datos a visualizar
+  sampling_rate: Frecuencia de muestreo
+  auto_scale: Si es 1, se ajusta automáticamente el rango en y
+  """
   len_data = len(data)
   t = np.linspace(0, len_data-1, num=len_data)/sampling_rate
+
+  y_min, y_max = sorted([y_min, y_max])
+
+
+
   for i in range(3):
     while ax[2-i].lines:
       ax[2-i].lines[0].remove()
     ax[2-i].plot(t, data[:, i*10: (i+1)*10])
-    ax[2-i].set_xlim([0, t_max])
+    ax[2-i].set_xlim([0, t.max()])
     if auto_scale==1:
       ax[2-i].set_ylim([data.min(), data.max()])
     else:
@@ -53,6 +75,12 @@ def ScanA_update(fig, ax, y_min, y_max, t_max, data, sampling_rate, auto_scale):
 # Scan C
 # =============================================================================
 def ScanC_create(z_min, z_max, t_max):
+  """
+  Crea la figura y los ejes para la visualización de Scan C.
+  z_min: Valor mínimo en el eje z
+  z_max: Valor máximo en el eje z
+  t_max: Valor máximo en el eje x (tiempo)
+  """
   n_y = 10     # Número de puntos en el eje y
   y = np.linspace(1, 10, n_y)
   fig, ax = plt.subplots(3, 1, figsize=(6, 4), dpi=150, sharex=True)
@@ -68,6 +96,17 @@ def ScanC_create(z_min, z_max, t_max):
   return fig, ax
 
 def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
+  """
+  Actualiza la figura y los ejes para la visualización de Scan C.
+  fig: Figura creada previamente
+  ax: Ejes creados previamente
+  z_min: Valor mínimo en el eje z
+  z_max: Valor máximo en el eje z
+  t_max: Valor máximo en el eje x (tiempo)
+  data: Datos a visualizar
+  sampling_rate: Frecuencia de muestreo
+  auto_scale: Si es 1, se ajusta automáticamente el rango en z
+  """
   n_y = 10  # Filas fijas
   y = np.linspace(1, 10, n_y)
   M = int(t_max * sampling_rate)  # Columnas por cuerpo
@@ -113,7 +152,7 @@ def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
   return fig, ax
 
 # =============================================================================
-# Alarma
+# Plot Alarma
 # =============================================================================
 def Alarm_create():
   # Configuración de la figura y ejes
@@ -134,22 +173,36 @@ def Alarm_create():
     ax[i].pcolormesh(X_alarm, Y_alarm, Z_alarm, shading='flat', cmap=cmap1)
     
     # Configuración de ejes (similar al original)
-    ax[i].set_ylabel(f"Cuerpo {i+1}")
-    ax[i].set_ylim([0.3, 10.8])
-    ax[i].set_yticks(np.linspace(1, 10, 10))  # Centros de las celdas
-    ax[i].set_yticklabels(labels, fontsize=8)
-    ax[i].set_xlim([0.8, 1.2])
-    ax[i].set_xticks([1])  # Centros de las celdas
-    ax[i].set_xticklabels([])  # Centros de las celdas
-    ax[i].set_xlabel("Alarmas")  # Centros de las celdas
-  return fig, ax, X_alarm, Y_alarm
+    ax[i].set_ylabel(f"Cuerpo {i+1}")         # Nombrar ejes
+    ax[i].set_ylim([0.3, 10.8])               # Limites del eje y
+    ax[i].set_yticks(np.linspace(1, 10, 10))  # Ticks en el eje y
+    ax[i].set_yticklabels(labels, fontsize=8) # Etiquetas en el eje y
+    ax[i].set_xlim([0.8, 1.2])                # Limites del eje x
+    ax[i].set_xticks([1])                     # ticks en el eje x
+    ax[i].set_xticklabels([])  # Etiquetas en el eje x
+    ax[i].set_xlabel("Alarmas")  # Etiqueta en el eje x
+  return fig, ax, X_alarm, Y_alarm  # Devolver fig, ax y mallas
 
 def Alarm_update(ax, X_alarm, Y_alarm, data):
-  # Actualizar los 3 subplots de alarmas
-  for i in range(3):
+  """#Actualizar los 3 subplots de alarmas con nuevos datos"""
+  for i in range(3): # Recorrer los 3 subplots
     # Limpiar solo el contenido del gráfico, no la configuración
-    for coll in ax[2-i].collections:
-      coll.remove()
+    for coll in ax[2-i].collections: # Recorrer los objetos del gráfico
+      coll.remove()                   # Eliminar el objeto
     # Crear nuevo gráfico con datos aleatorios
     ax[2-i].pcolormesh(X_alarm, Y_alarm, data[i],  shading='flat',cmap=cmap1)
-  return ax
+  return ax       # Devolver ejes actualizados
+
+# =============================================================================
+# Verification function
+# =============================================================================
+def verify_empty(variable, value): 
+  """
+  Verifica si se obtiene el valor, caso contrario devuelve un valor por defecto
+  variable: variable a verificar
+  value: valor por defecto
+  """
+  try: # Intentar obtener escala de los ejes
+    return  variable.get()
+  except: # Si falla, establecer valores por defecto
+    return value
