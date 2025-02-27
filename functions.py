@@ -1,9 +1,10 @@
-# =============================================================================
+#%% ===========================================================================
 # Graficas, Librerias y definiciones
 # =============================================================================
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.colors import BoundaryNorm
+from scipy.signal import butter, lfilter, lfilter_zi
 import numpy as np
 colors = [(0,    (1, 1, 1)),       # Green
           (1,    (1,     0, 0))]      # red
@@ -20,7 +21,7 @@ cmap2 = LinearSegmentedColormap.from_list('custom_cmap', colors2,
                                           N=7
                                           )
 
-# =============================================================================
+#%% ===========================================================================
 # Scan A
 # =============================================================================
 def ScanA_create(y_min, y_max, t_max):
@@ -57,21 +58,20 @@ def ScanA_update(fig, ax, y_min, y_max, t_max, data, sampling_rate, auto_scale):
 
   y_min, y_max = sorted([y_min, y_max])
 
-
-
   for i in range(3):
     while ax[2-i].lines:
       ax[2-i].lines[0].remove()
-    ax[2-i].plot(t, data[:, i*10: (i+1)*10])
+    data_plot = data[:, i*10: (i+1)*10] # Seleccionar datos de un cuerpo
+    ax[2-i].plot(t, data_plot[:, ::-1]) # invertir señales para ajustar al label
     ax[2-i].set_xlim([0, t.max()])
     if auto_scale==1:
       ax[2-i].set_ylim([data.min(), data.max()])
     else:
       ax[2-i].set_ylim([y_min, y_max])
-  ax[0].legend(labels, loc='upper right', bbox_to_anchor=(1.19, 0.5),  ncol=1)
+  ax[0].legend(labels[::-1], loc='upper right', bbox_to_anchor=(1.19, 0.5),  ncol=1)
   return fig, ax
 
-# =============================================================================
+#%% ===========================================================================
 # Scan C
 # =============================================================================
 def ScanC_create(z_min, z_max, t_max):
@@ -151,7 +151,7 @@ def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
   
   return fig, ax
 
-# =============================================================================
+#%% ===========================================================================
 # Plot Alarma
 # =============================================================================
 def Alarm_create():
@@ -193,7 +193,7 @@ def Alarm_update(ax, X_alarm, Y_alarm, data):
     ax[2-i].pcolormesh(X_alarm, Y_alarm, data[i],  shading='flat',cmap=cmap1)
   return ax       # Devolver ejes actualizados
 
-# =============================================================================
+#%% ===========================================================================
 # Verification function
 # =============================================================================
 def verify_empty(variable, value): 
@@ -206,3 +206,34 @@ def verify_empty(variable, value):
     return  variable.get()
   except: # Si falla, establecer valores por defecto
     return value
+
+#%% ===========================================================================
+#  real time low pass
+# =============================================================================
+class LowPassFilter:
+  def __init__(self, btype='lowpass', sf=300, f=[20], num_sensors=1):
+    self.sf = sf
+    self.f = f
+    self.btype = btype
+    self.num_sensors = num_sensors
+    self._create_filter()
+
+  def _create_filter(self):
+    Ns = self.sf * 0.5
+    Wn = np.array(self.f) / Ns
+    self.sb, self.sa = butter(3, Wn=Wn, btype=self.btype)
+    # Inicializa zi para todos los sensores (shape: [num_sensors, len(zi)])
+    zi_single = lfilter_zi(self.sb, self.sa)
+    self.zi = np.tile(zi_single, (self.num_sensors, 1))  # [num_sensors, len(zi)]
+
+  def apply(self, samples):
+    samples = np.asarray(samples).reshape(1, -1)  # [1, num_sensors]
+    # Aplica filtro vectorizado
+    y, self.zi = lfilter(
+        self.sb, self.sa, 
+        samples.T, 
+        axis=1,               # Procesa sensores a lo largo del eje 1
+        zi=self.zi         # Transpone para que coincida con las dimensiones
+    )
+    return y.flatten()        # Devuelve un arreglo 1D
+

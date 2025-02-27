@@ -14,7 +14,9 @@ from multiprocessing import Process, Queue, Event, Manager
 from queue import Empty  # Para capturar la excepción en get(timeout=...)
 from objects import DataAdquisition, DataSaver, DataAlarm
 from functions import *
-
+#   
+import threading    # Para ejecutar la conexión en un hilo separado
+import time         # Para simular la búsqueda de conexión
 
 #%% ========================================================================
 # Interface Principal
@@ -59,6 +61,9 @@ class MainInterFace:
 
     # Bind the time_scale variable to the validate_time_scale method
     self.time_scale.trace_add("write", self.validate_time_scale)
+
+    # ... código existente ...
+    self.acquisition_active = multiprocessing.Value('b', False)  # booleana compartida
 
     # Configuraciones iniciales
     self.sampling_rate = 300      # Frecuencia de muestreo de los sensores
@@ -207,12 +212,15 @@ class MainInterFace:
     # | +----------------+ +-------+ +-------+ +-------+ +-------+ +-----+ |
     # Botón de Conección principal ---------------------------------------
     self.btn_conect = tk.Button(self.control_frame, 
+                                disabledforeground="#8B0000",  # Color de texto cuando está deshabilitado
                                 text="Conectar", bg=self.hex_color,
                                 command=self.toggle_conect, width=13,)
     self.btn_conect.grid(row=0, column=0, padx=5, columnspan=6, sticky='ew')
     # Botón para activar la alarma ----------------------------------------
     self.btn_alarm = tk.Button(self.control_frame, 
+                                disabledforeground="#8B0000",  # Color de texto cuando está deshabilitado
                                 text="Alarma", bg=self.hex_color,
+                                state="disable", 
                                 command=self.toggle_alarm, width=9, )
     self.btn_alarm.grid(row=1, column=0, padx=3)
 
@@ -244,6 +252,8 @@ class MainInterFace:
 
     # save data ----------------------------------------------------------------
     self.btn_save = tk.Button(self.control_frame, text="Guardar", 
+                              state="disable",
+                              disabledforeground="#8B0000",  # Color de texto cuando está deshabilitado
                               bg=self.hex_color, command=self.toggle_save, width=9)
     self.btn_save.grid(row=2, column=0, padx=5)
 
@@ -274,8 +284,8 @@ class MainInterFace:
     """Activa o desactiva la adquisición de datos."""
     # Conectar datps
     if self.btn_conect.config('text')[-1] == "Conectar":
-      # configurar el botón de conexión
-      self.btn_conect.config(text="Conectado", bg="green", fg="white")
+      # Cambiar a estado "Conectando" y deshabilitar botón
+      self.btn_conect.config(text="Conectando", bg="yellow", state="disabled")
       # Crear nuevas colas y evento
       self.queue_save = Queue()       # Cola para guardar datos
       self.queue_plot = Queue()       # Cola para graficar datos
@@ -291,22 +301,22 @@ class MainInterFace:
           self.stop_event,    # Evento de parada
           enable_plot=self.enable_plot,       # Activar/desactivar gráficos
           enable_process=self.enable_process, # Activar/desactivar alarma
-          enable_save=self.enable_save        # Activar/desactivar guardado
+          enable_save=self.enable_save,       # Activar/desactivar guardado
+          acquisition_active=self.acquisition_active  # variable compartida
       )
 
       # Iniciar procesos
       self.data_adquisition.start() # Iniciar proceso de adquisición de datos
 
+      # Iniciar un hilo que monitoree la variable y actualice el botón
+      threading.Thread(target=self.monitor_acquisition, daemon=True).start()
     # Desconectar datos
     else:
+      #self.disconnect()
       # Configurar el botón de conexión
       self.btn_conect.config(text="Conectar", bg=self.hex_color, fg="black")
-
-      ## Detener procesos de alarma y guardado si están activos
-      #if self.enable_process.is_set():
-      #  self.btn_alarm.invoke()  # Simula la pulsación del botón de alarma
-      #if self.enable_save.is_set():
-      #  self.btn_save.invoke()   # Simula la pulsación del botón de guardado
+      self.btn_alarm.config(state="disable")
+      self.btn_save.config(state="disable")
 
       # Detener procesos
       self.enable_plot.clear() # Señalar a DataAdquisition parar de plotear
@@ -336,6 +346,7 @@ class MainInterFace:
                                     self.shared_alarms    # Variable compartida
                                     )
       self.data_process.start()     # Iniciar proceso de alarma de datos
+      self.btn_conect.config(state="disable") # Deshabilitar el botón de desconexión
     else:
       self.btn_alarm.config(text="Alarma", bg=self.hex_color, fg="black")
       self.enable_process.clear()       # Señala a DataSaver que debe salir
@@ -345,6 +356,8 @@ class MainInterFace:
         self.data_process.join()        # Espera a que finalice
         self.data_process = None        # Limpiar referencia
       #self.manager.shutdown()  # Cerrar el Manager al detener el proceso
+      if self.btn_save.config('text')[-1] == "Guardar": # Si no esta guardando datos
+        self.btn_conect.config(state="normal")   # Habilitar el botón de desconexión
 
   def toggle_save(self):
     """Activa o desactiva el guardado de datos."""
@@ -355,12 +368,15 @@ class MainInterFace:
         self.enable_save, name=str(self.file_name.get())  # Nombre de archivo
       )
       self.data_saver.start()     # Iniciar proceso de guardado
+      self.btn_conect.config(state="disable")  # Deshabilitar el botón de desconexión
     else:
       self.btn_save.config(text="Guardar", bg=self.hex_color, fg="black")
       self.enable_save.clear()  # Señala a DataSaver que debe salir
       if self.data_saver is not None: # Si el proceso existe
         self.data_saver.join()        # Espera a que finalice
         self.data_saver = None        # Limpiar referencia
+      if self.btn_alarm.config('text')[-1] == "Alarma": # Si la alarma no esta activa
+        self.btn_conect.config(state="normal")  # Habilitar el botón de desconexión
 
   def create_plot_main(self, scan_type="Scan A"):
     """crea el gráfico principal en el frame plot_graf_frame"""
@@ -446,13 +462,12 @@ class MainInterFace:
     except Exception as e: 
       print(f"Error en update_plot_alarm: {e}")
       
-
   def update_plot_real_time(self):
     """Actualiza los gráficos en tiempo real."""
     self.update_plot_main() # Actualizar el gráfico principal
     if self.enable_process.is_set():  # Si la alarma está activada
       self.update_plot_alarm()        # Actualizar el gráfico de alarmas
-    self.root.after(33,               # Actualizar cada 33 ms (30 Hz)   
+    self.root.after(int(15/300*1000),               # Actualizar cada 33 ms (30 Hz)   
                     self.update_plot_real_time)  
 
   def update_alarm_threshold(self, *args):
@@ -510,7 +525,15 @@ class MainInterFace:
     if self.data_adquisition is not None:
       self.enable_plot.set()
 
-
+  def monitor_acquisition(self):
+    # Espera hasta que acquisition_active se active
+    while not self.acquisition_active.value:
+      time.sleep(0.1)
+    # Una vez activado, actualiza el botón en el hilo de la GUI
+    self.root.after(0, lambda: self.btn_conect.config(
+      text="Conectado", bg="green", state="normal", fg="white"))
+    self.btn_alarm.config(state="normal")
+    self.btn_save.config(state="normal")
 if __name__ == "__main__":  # Si se ejecuta el script principal
   multiprocessing.freeze_support()    # Congelar soporte para Windows
   root = tk.Tk()                      # Crear la ventana principal  

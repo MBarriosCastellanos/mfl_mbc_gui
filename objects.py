@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import multiprocessing
 from multiprocessing import Process, Queue, Event
 import winsound  # Permite generar sonidos en sistemas Windows
+from functions import LowPassFilter
 
 # =============================================================================
 # Funciones auxiliares
@@ -44,7 +45,8 @@ def buffer_management( buffer, enable, queue, threshold,
 # =============================================================================
 class DataAdquisition(Process):
 	def __init__(self, queue_save, queue_plot,  queue_process, stop_event, 
-							enable_plot=Event(), enable_process=Event(), enable_save=Event()):
+							enable_plot=Event(), enable_process=Event(), enable_save=Event(),
+							acquisition_active=None):
 		""" Inicializa el proceso de adquisición de datos.
 		:param queue_save: Cola para enviar datos al proceso de guardado.
 		:param queue_plot: Cola para enviar datos al proceso de plot.
@@ -77,6 +79,12 @@ class DataAdquisition(Process):
 		self.enable_save = enable_save          # habilitar fila de guardado 
 		self.enable_plot = enable_plot          # habilitar fila de plotadp
 		self.enable_process = enable_process    # habilitar fila de procesado
+
+		# Variable booleana compartida (tipo multiprocessing.Value)
+		self.acquisition_active = acquisition_active # Monitorea la adquisición de datos
+
+		# definir filtros para cada cuerpo
+		self.filters = {i: LowPassFilter() for i in range(3)}
 
 	def open_serial_ports(self):
 		"""Abre los puertos serial disponibles y crea un buffer para cada uno."""
@@ -170,6 +178,10 @@ class DataAdquisition(Process):
 		Lee continuamente de los puertos, acumula datos y, cuando se tiene 
 		suficiente, publica los datos en las colas para el guardado y el plot.
 		"""
+		# Informar que la adqiuisición está activa
+		if self.acquisition_active is not None:
+			self.acquisition_active.value = True
+
 		n_ports = len(self.ports)				# número de puertos
 		buffer_acquisition = {i: [] for i in range(n_ports)}	# buffer de adquisición
 		buffer_plot = {i: [] for i in range(n_ports)}			# buffer de plot
@@ -187,15 +199,16 @@ class DataAdquisition(Process):
 			for i in range(n_ports):				# para cada puerto
 				values, body = self.read_port_data(i)  # Leer datos de cada puerto
 				if body is not None:					# si se identifica el cuerpo
+					filtered_values = list(self.filters[body].apply(values) ) # Filtrar los datos
 					# llenar las colas de datos paralelas
 					buffer_acquisition[body].append(values)	# añadir los valores al buffer de adquisición
 					if self.enable_plot.is_set():					# si se activa el plot
-						buffer_plot[body].append(values)		# añadir los valores al buffer de plot
+						buffer_plot[body].append(filtered_values)		# añadir los valores al buffer de plot
 					if self.enable_process.is_set():			# si se activa el procesamiento
-						buffer_process[body].append(values)	# añadir los valores al buffer de procesamiento
+						buffer_process[body].append(filtered_values)	# añadir los valores al buffer de procesamiento
 
 			self.queue_plot, buffer_plot, _ =  buffer_management( # manejar el buffer de plot 
-				buffer_plot, self.enable_plot, self.queue_plot, 10)	#  con 10 datos
+				buffer_plot, self.enable_plot, self.queue_plot, 15)	#  con 10 datos
 
 			self.queue_process, buffer_process, _ =  buffer_management(		# manejar el buffer de procesamiento
 				buffer_process, self.enable_process, self.queue_process, 1)	# con 1 dato
@@ -205,6 +218,10 @@ class DataAdquisition(Process):
 				True, n_it, start_time_loop)																	# imprimir los datos
 
 			time.sleep(0.001)													# esperar 1 ms
+		else:	# si se recibe la señal de paro
+			# Informar que la adquisición está inactiva
+			if self.acquisition_active is not None:
+				self.acquisition_active.value = False
 		self.close_serial_ports()										# cerrar los puertos
 
 	def run(self):
@@ -296,19 +313,20 @@ class DataAlarm(Process):
 				# Procesa todos los datos disponibles en la cola sin bloquear
 				while not self.queue.empty(): # mientras la cola no esté vacía
 					data = self.queue.get_nowait() # obtener los datos
-					try:										# intentar 	
+					try:										# intentar 	tamaño (30,1)
 						data_array = np.column_stack(	# concatenar los datos
 							[np.array(data[key]) for key in sorted(data.keys())])
-					except Exception as e:	# si hay un error
+					except Exception as e:	# si hay un error 
 						print(f"Error al concatenar datos: {e}")
 						continue
 
+					# matriz de datos (30, x)
 					if self.data is None:	# si no hay datos
 						self.data = data_array # asignar los datos
 					else:			# si hay datos empezar a concatenar
 						self.data = np.vstack((self.data, data_array))
 
-					# 1. CONSTRUCCIÓN DE LA MUESTRA DE DATOS
+					# 1. CONSTRUCCIÓN DE LA MUESTRA DE DATOS (30,20)
 					sample_size = 20 						# tamaño de la muestra
 					if len(self.data) > sample_size:		# si la muestra es mayor al tamaño
 						self.data = self.data[-sample_size:, :] # reducir la muestra
@@ -329,7 +347,7 @@ class DataAlarm(Process):
 								2: alarms[20:]
 						})
 						# 3. ACCIÓN EN CASO DE ALARMA
-						if any(eval_alarmas):  # Si se detecta una alarma						
+						if any(eval_alarmas):  # Si se detecta una alarma		
 							try:									# intentar 
 								frequency = 2000  # Frecuencia del sonido de alarma en Hz
 								duration = 800  # Duración del sonido en milisegundos
