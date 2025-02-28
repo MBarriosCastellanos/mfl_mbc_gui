@@ -1,26 +1,26 @@
+#%% ===========================================================================
+# Importar librerías principales
 # =============================================================================
-# Proceso de Adquisición de Datos
-# =============================================================================
-import serial
-import struct
-import csv
-from datetime import datetime
-import numpy as np
-from serial.tools import list_ports
-import time
-import matplotlib.pyplot as plt
-import multiprocessing
-from multiprocessing import Process, Queue, Event
+import serial										# Comunicación serial 
+import struct										# Estructuras de datos
+import csv											# Archivos CSV
+from datetime import datetime		# Fecha y hora actual 	
+import numpy as np							# Operaciones matemáticas
+from serial.tools import list_ports	# Lista de puertos COmm disponibles
+import time													# Tiempo		
+from multiprocessing import Process, Event	# Procesos y eventos multiproceso
 import winsound  # Permite generar sonidos en sistemas Windows
-from functions import LowPassFilter
+from scipy.signal import butter, lfilter, lfilter_zi	# Filtros digitales
+import os													# Operaciones del sistema operativo
 
-# =============================================================================
+#%% ===========================================================================
 # Funciones auxiliares
 # =============================================================================
 def buffer_management( buffer, enable, queue, threshold,
 	printV=False, n_it=0,
 	start_time_loop=0):	
-	
+	"""
+	Función para gestionar los buffers de datos y publicarlos en las colas."""
 	min_len = min(len(lst) for lst in buffer.values())
 
 	n_it =  n_it + 1 if printV else n_it
@@ -40,7 +40,20 @@ def buffer_management( buffer, enable, queue, threshold,
 			queue.put(buffer_publish)
 	return queue, buffer, n_it
 
-# =============================================================================
+def convert(value_bin):
+	"""Convierte un valor binario a kVA."""
+	#max_volt = 3300  # mV
+	#max_bin = 4096
+	#V_mV = max_volt * (np.array(value_bin) / max_bin)
+	#offset = 1650  # mV
+	#sensor_gain = 5  # mV/Gauss
+	#B = (V_mV - offset) / sensor_gain / 10000 # Tesla
+
+	#mu_0 = 4 * np.pi * 1e-7  # Tesla * m / A
+	#return B / mu_0  # A/m
+	return value_bin
+
+#%% ===========================================================================
 # Proceso de Adquisición de Datos
 # =============================================================================
 class DataAdquisition(Process):
@@ -199,7 +212,8 @@ class DataAdquisition(Process):
 			for i in range(n_ports):				# para cada puerto
 				values, body = self.read_port_data(i)  # Leer datos de cada puerto
 				if body is not None:					# si se identifica el cuerpo
-					filtered_values = list(self.filters[body].apply(values) ) # Filtrar los datos
+					filtered_values = convert(values)	# convertir los valore
+					filtered_values = list(self.filters[body].apply(filtered_values) ) # Filtrar los datos
 					# llenar las colas de datos paralelas
 					buffer_acquisition[body].append(values)	# añadir los valores al buffer de adquisición
 					if self.enable_plot.is_set():					# si se activa el plot
@@ -217,7 +231,7 @@ class DataAdquisition(Process):
 				buffer_acquisition, self.enable_save, self.queue_save, 300,   # con 300 datos
 				True, n_it, start_time_loop)																	# imprimir los datos
 
-			time.sleep(0.001)													# esperar 1 ms
+			time.sleep(0.002)													# esperar 1 ms
 		else:	# si se recibe la señal de paro
 			# Informar que la adquisición está inactiva
 			if self.acquisition_active is not None:
@@ -232,7 +246,7 @@ class DataAdquisition(Process):
 		self.identify_comm_mfl()									# identificar los puertos
 		self.publish_data_loop()									# publicar los datos
 
-# =============================================================================
+#%% ===========================================================================
 # Proceso de Guardado de Datos en CSV
 # =============================================================================
 class DataSaver(Process):
@@ -253,8 +267,17 @@ class DataSaver(Process):
 		self.name = name if len(name)==0 else "_" + name 
 
 	def create_csv_file(self, num_bodies):
+		"""Crea un archivo CSV con los datos recibidos."""
+		# Obtener la carpeta Documents del usuario
+		user_profile = os.getenv('USERPROFILE')  # Ej: C:\Users\Usuario
+		documents_folder = os.path.join(user_profile, "Documents")
+		# Definir la carpeta de datos dentro de Documents
+		data_folder = os.path.join(documents_folder, "datos_mlf")
+		os.makedirs(data_folder, exist_ok=True)  # Crear la carpeta si no existe
+
 		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S" + self.name)
-		filename = f"datos_{timestamp}.csv"
+		filename = os.path.join(				# Crear el nombre del archivo
+			data_folder, f"datos_{timestamp}{self.name}.csv")
 		self.csv_file = open(filename, 'w', newline='')
 		self.writer = csv.writer(self.csv_file)
 		headers = []
@@ -288,7 +311,7 @@ class DataSaver(Process):
 # Proceso de Alarma de Datos
 # =============================================================================
 class DataAlarm(Process):
-	def __init__(self, queue_alarm, run_event, threshold, alarms):
+	def __init__(self, queue_alarm, run_event, threshold, alarms, shared_alg):
 		"""
 		Proceso que detecta alarmas en los datos recibidos y emite un sonido.
 		:param queue_alarm: Cola de datos para procesar.
@@ -302,6 +325,7 @@ class DataAlarm(Process):
 		self.data = None							# datos
 		self.threshold = threshold		# umbral
 		self.alarms = alarms					# alarmas
+		self.shared_alg = shared_alg	# tipo de algoritmo
 		
 	def run(self):
 		""" Método principal del proceso. """		
@@ -334,11 +358,18 @@ class DataAlarm(Process):
  					# 2. PROCESAMIENTO DE LA MUESTRA SI ES SUFICIENTEMENTE GRANDE
 					if len(self.data) >= sample_size:    # Si se tiene el tamaño nesario de la muestra
 						# Convierte la muestra en un arreglo de NumPy para procesamiento
-						rms = np.sqrt(np.mean(self.data ** 2, axis=0))  # Calcula el RMS de cada sensor
-						ymax = np.max(self.data, axis=0)  # Encuentra los valores máximos de cada sensor
+						print(f"Algoritmo usado es {self.shared_alg.algorithm}")
+						if self.shared_alg.algorithm == "Algoritmo RMS":
+							rms = np.sqrt(np.mean(self.data ** 2, axis=0))  # Calcula el RMS de cada sensor
+							ymax = np.max(self.data, axis=0)  # Encuentra los valores máximos de cada sensor
 
-						# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
-						eval_alarmas = ymax > (rms + current_threshold)	# evaluar las alarmas
+							# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
+							eval_alarmas = ymax > (rms + current_threshold)	# evaluar las alarmas
+						else:
+							std = np.std(self.data, axis=0)  # Calcula la desviación estándar de cada sensor
+							mean = np.mean(self.data, axis=0) # Calcula la media de cada sensor
+							value = data_array = data_array.reshape(data_array.shape[1],)
+							eval_alarmas = value  > (mean + 3*std) # evaluar las alarmas  
 						alarms = eval_alarmas*1												# convertir a 0 y 1
 						alarms = alarms.reshape((len(alarms), 1))			# redimensionar
 						self.alarms.update({		# separar las alarmas por cuerpo
@@ -359,4 +390,44 @@ class DataAlarm(Process):
 
 			except Exception as e:		# si hay un error
 				print(f"Error en update_plot: {e}")	# si hay un error
+
+#%% ===========================================================================
+#  real time low pass
+# =============================================================================
+class LowPassFilter:
+	def __init__(self, btype='lowpass', sf=300, f=[20], num_sensors=1):
+		"""Filtro pasa bajos de 3er orden."""
+		self.sf = sf					# Frecuencia de muestreo
+		self.f = f						# Frecuencias de corte
+		self.btype = btype		# Tipo de	filtro
+		self.num_sensors = num_sensors	# Número de sensores
+		self._create_filter()						# Crear el filtro
+
+	def _create_filter(self):
+		"""Crea el filtro Butterworth."""
+		# Normaliza las frecuencias de corte
+		Ns = self.sf * 0.5					# Frecuencia de Nyquist
+		Wn = np.array(self.f) / Ns	# Frecuencias de corte normalizadas	
+		# Coeficientes del filtro pasa bajos Butterworth de 3er orden
+		self.sb, self.sa = butter( #sb: numerador, sa: denominador
+																3, Wn=Wn, btype=self.btype)
+		
+		# Inicializa zi para todos los sensores (shape: [num_sensors, len(zi)])
+		# zi es un vector de condiciones iniciales para lfilter
+		zi_single = lfilter_zi(self.sb, self.sa)	
+		self.zi = np.tile(zi_single, (self.num_sensors, 1))  # [num_sensors, len(zi)]
+
+	def apply(self, samples):
+		"""Aplica el filtro a los datos de entrada."""
+		# Convierte la lista de muestras en un arreglo 2D
+		samples = np.asarray(samples).reshape(1, -1)  # [1, num_sensors]
+
+		# Aplica filtro vectorizado
+		y, self.zi = lfilter(			# Aplica el filtro lfiter= filtro lineal	
+				self.sb, self.sa, 		# Coeficientes del filtro
+				samples.T, 						# Transpone para que coincida con las dimensiones
+				axis=1,               # Procesa sensores a lo largo del eje 1
+				zi=self.zi         # Transpone para que coincida con las dimensiones
+		) # Devuelve la salida y y las nuevas condiciones iniciales zi
+		return y.flatten()        # Devuelve un arreglo 1D fitrad para n sensores 
 

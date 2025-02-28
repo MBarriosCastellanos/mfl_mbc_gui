@@ -4,7 +4,6 @@
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.colors import BoundaryNorm
-from scipy.signal import butter, lfilter, lfilter_zi
 import numpy as np
 colors = [(0,    (1, 1, 1)),       # Green
           (1,    (1,     0, 0))]      # red
@@ -206,34 +205,4 @@ def verify_empty(variable, value):
     return  variable.get()
   except: # Si falla, establecer valores por defecto
     return value
-
-#%% ===========================================================================
-#  real time low pass
-# =============================================================================
-class LowPassFilter:
-  def __init__(self, btype='lowpass', sf=300, f=[20], num_sensors=1):
-    self.sf = sf
-    self.f = f
-    self.btype = btype
-    self.num_sensors = num_sensors
-    self._create_filter()
-
-  def _create_filter(self):
-    Ns = self.sf * 0.5
-    Wn = np.array(self.f) / Ns
-    self.sb, self.sa = butter(3, Wn=Wn, btype=self.btype)
-    # Inicializa zi para todos los sensores (shape: [num_sensors, len(zi)])
-    zi_single = lfilter_zi(self.sb, self.sa)
-    self.zi = np.tile(zi_single, (self.num_sensors, 1))  # [num_sensors, len(zi)]
-
-  def apply(self, samples):
-    samples = np.asarray(samples).reshape(1, -1)  # [1, num_sensors]
-    # Aplica filtro vectorizado
-    y, self.zi = lfilter(
-        self.sb, self.sa, 
-        samples.T, 
-        axis=1,               # Procesa sensores a lo largo del eje 1
-        zi=self.zi         # Transpone para que coincida con las dimensiones
-    )
-    return y.flatten()        # Devuelve un arreglo 1D
-
+  

@@ -7,16 +7,18 @@ from tkinter import font, ttk       # Fonts and combobox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg 
 from PIL import Image, ImageTk      # Manejo de imágenes
 import numpy as np                  # Procesamiento numérico
-from tkinter import font, ttk
+from tkinter import font, ttk       # Fonts and combobox
 # procesamiento de datos
 import multiprocessing
 from multiprocessing import Process, Queue, Event, Manager
 from queue import Empty  # Para capturar la excepción en get(timeout=...)
 from objects import DataAdquisition, DataSaver, DataAlarm
-from functions import *
-#   
+# Para ejecutar la conexión en un hilo separado
 import threading    # Para ejecutar la conexión en un hilo separado
 import time         # Para simular la búsqueda de conexión
+
+# Importar funciones de funciones.py
+from functions import *   # Importar todas las funciones de functions.py
 
 #%% ========================================================================
 # Interface Principal
@@ -49,21 +51,32 @@ class MainInterFace:
     self.shared_alarms = self.manager.dict()  # Estatus alamra de los 30 sensores
     self.shared_alarms.update({ i:np.array([[0]] * 10) for i in range(3) })              
 
-    # Initialize variables de los gráficos
+    # Initialize variables de los gráficos e interface
     self.time_scale = tk.IntVar(value=4)    # Ventana de tiempo inicial  
     self.mag_min = tk.DoubleVar(value=2000) # Límite inferior inicial
     self.mag_max = tk.DoubleVar(value=3000) # Límite superior inicial
     self.file_name = tk.StringVar(value="") # Nombre de archivo para guardar
-    self.plot_type = tk.StringVar(value="Scan A") # Tipo de gráfico inicial
+    self.plot_type = tk.StringVar(value="Scan A") # Tipo de gráfico inicia
+    self.alg_type = tk.StringVar(value="Algoritmo RMS") # Tipo de algoritmo
 
-    # Bind the Combobox selection change event to the switching method
-    self.plot_type.trace_add("write", self.switch_plot)
 
-    # Bind the time_scale variable to the validate_time_scale method
+    # Establece el tipo de grafico a Scan A o Scan C, escribe la variable 
+    self.plot_type.trace_add("write", self.switch_plot) #escribe self.plot_type
+
+    # Establece la ventana de tiempo, escribe la variable verificando el valor
     self.time_scale.trace_add("write", self.validate_time_scale)
 
-    # ... código existente ...
+    #  Variables compartidas para la adquisición de datos  
     self.acquisition_active = multiprocessing.Value('b', False)  # booleana compartida
+
+    # Crear una variable compartida en el manager para el algoritmo
+    self.manager_namespace = self.manager.Namespace()
+    self.manager_namespace.algorithm = self.alg_type.get()
+
+    # Vincular el cambio en el combobox para actualizar la variable compartida
+    def update_shared_algorithm(*args):       #
+      self.manager_namespace.algorithm = self.alg_type.get()
+    self.alg_type.trace_add("write", update_shared_algorithm)
 
     # Configuraciones iniciales
     self.sampling_rate = 300      # Frecuencia de muestreo de los sensores
@@ -147,6 +160,10 @@ class MainInterFace:
     ttk.Combobox(self.plot_data_frame, textvariable=self.plot_type, 
                   values=["Scan A", "Scan C"], state="readonly").grid(
                     row=0, column=0, columnspan=2, padx=5)
+    
+    ttk.Combobox(self.plot_data_frame, textvariable=self.alg_type, 
+                  values=["Algoritmo RMS", "Algoritmo STD"], state="readonly").grid(
+                    row=0, column=4, columnspan=2, padx=5)
 
     # Control de la ventana de tiempo
     tk.Label(                   # Etiqueta para la ventana de tiempo
@@ -166,7 +183,7 @@ class MainInterFace:
     # Limites manuales de la escala
     self.scale_widgets_state = 'disabled'
     tk.Label(               # Etiqueta para los limites de la escala
-      self.plot_data_frame, text="Limites flujo magnetico [Gauss]"
+      self.plot_data_frame, text="Limites flujo magnetico [A/m]"
       ).grid(row=1, column=2, columnspan=4, padx=5, sticky='ew')
     
     # Configuración del limite inferior de la grafica
@@ -324,7 +341,7 @@ class MainInterFace:
       
       # Esperar a que terminen
       if self.data_adquisition is not None:
-          self.data_adquisition.join()
+          self.data_adquisition.join(timeout=1)
       
       # Limpiar referencias
       self.data_adquisition = None    # Proceso de adquisición de datos
@@ -343,7 +360,8 @@ class MainInterFace:
                                     self.queue_process,   # Cola para alarma de datos
                                     self.enable_process,  # Evento de inicio/parada
                                     self.alarm_threshold, # Umbral de alarma
-                                    self.shared_alarms    # Variable compartida
+                                    self.shared_alarms,    # Variable compartida
+                                    self.manager_namespace  # tipo de algoritmo
                                     )
       self.data_process.start()     # Iniciar proceso de alarma de datos
       self.btn_conect.config(state="disable") # Deshabilitar el botón de desconexión
@@ -353,7 +371,7 @@ class MainInterFace:
       while not self.queue_process.empty():
         self.queue_process.get_nowait()
       if self.data_process is not None: # Si el proceso existe
-        self.data_process.join()        # Espera a que finalice
+        self.data_process.join(timeout=1)        # Espera a que finalice
         self.data_process = None        # Limpiar referencia
       #self.manager.shutdown()  # Cerrar el Manager al detener el proceso
       if self.btn_save.config('text')[-1] == "Guardar": # Si no esta guardando datos
@@ -534,8 +552,37 @@ class MainInterFace:
       text="Conectado", bg="green", state="normal", fg="white"))
     self.btn_alarm.config(state="normal")
     self.btn_save.config(state="normal")
-if __name__ == "__main__":  # Si se ejecuta el script principal
-  multiprocessing.freeze_support()    # Congelar soporte para Windows
-  root = tk.Tk()                      # Crear la ventana principal  
-  app = MainInterFace(root)           # Crear la interfaz principal  
-  root.mainloop()                     # Iniciar el bucle principal
+
+#%% ========================================================================
+# Protocolo para cerrar la aplicación
+# ==========================================================================
+def on_closing(app):
+  """Protocolo para cerrar la aplicación."""
+  # Detener proceso de adquisición si está activo
+
+  PROCESS = [app.data_adquisition, app.data_saver, app.data_process]
+  PARAMS = [app.stop_event, app.enable_plot, app.enable_save, app.enable_process]
+  QUEUE = [app.queue_plot, app.queue_save,  app.queue_process]
+
+  # Detener procesos
+  for process, param, queue in zip(PROCESS, PARAMS, QUEUE):
+    if process is not None:
+      if process == app.data_adquisition:
+        app.stop_event.set()    # Activar bandera de detención de adquisición
+      param.clear()     # Desactivar bandera de procesamiento
+      if process.is_alive():  # Si el proceso está activo
+        param.clear()         # Desactivar bandera de procesamiento
+        process.terminate()   # Terminar proceso
+        process.join(timeout=0.3) # Esperar a que termine
+      if queue is not None:       # Si hay una cola
+        while not queue.empty():  # Mientras la cola no esté vacía
+          try:    queue.get_nowait()  # Obtener elemento de la cola      
+          except: break               # Salir si no hay elementos                
+
+  # Cerrar el Manager y otras colas si fuese necesario
+  try:
+    app.manager.shutdown()           # Cerrar el Manager
+  except Exception as e:
+    print(f"Error al cerrar el Manager: {e}")
+  # Cierra la ventana principal
+  app.root.destroy()                 # Destruir ventana principal  
