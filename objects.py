@@ -281,7 +281,7 @@ class DataSaver(Process):
 
 		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S" + self.name)
 		filename = os.path.join(				# Crear el nombre del archivo
-			data_folder, f"datos_{timestamp}{self.name}.csv")
+			data_folder, f"datos_{timestamp}.csv")
 		self.csv_file = open(filename, 'w', newline='')
 		self.writer = csv.writer(self.csv_file)
 		headers = []
