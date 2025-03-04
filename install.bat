@@ -20,7 +20,7 @@ REM -------------------------------
 REM Generar el ejecutable con PyInstaller
 REM -------------------------------
 echo Ejecutando PyInstaller...
-python -m PyInstaller --onefile main.py
+python -m PyInstaller --onedir --noconsole main.py
 if errorlevel 1 (
     echo Error al ejecutar PyInstaller.
     pause
@@ -40,7 +40,7 @@ REM -------------------------------
 REM Copiar la carpeta figures (por ejemplo, el archivo mfl_sup.jpg) a dist\figures
 REM -------------------------------
 if exist "figures" (
-    xcopy /E /I /Y figures "dist\figures"
+    xcopy /E /I /Y figures "dist\main\figures\"
     echo Carpeta "figures" copiada en dist.
 ) else (
     echo La carpeta "figures" no existe.

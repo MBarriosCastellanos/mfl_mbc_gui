@@ -162,7 +162,8 @@ class MainInterFace:
                     row=0, column=0, columnspan=2, padx=5)
     
     ttk.Combobox(self.plot_data_frame, textvariable=self.alg_type, 
-                  values=["Algoritmo RMS", "Algoritmo STD"], state="readonly").grid(
+                  values=["Algoritmo RMS", #"Algoritmo STD"
+                          ], state="readonly").grid(
                     row=0, column=4, columnspan=2, padx=5)
 
     # Control de la ventana de tiempo

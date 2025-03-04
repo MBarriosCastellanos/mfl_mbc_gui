@@ -42,16 +42,16 @@ def buffer_management( buffer, enable, queue, threshold,
 
 def convert(value_bin):
 	"""Convierte un valor binario a kVA."""
-	#max_volt = 3300  # mV
-	#max_bin = 4096
-	#V_mV = max_volt * (np.array(value_bin) / max_bin)
-	#offset = 1650  # mV
-	#sensor_gain = 5  # mV/Gauss
-	#B = (V_mV - offset) / sensor_gain / 10000 # Tesla
+	max_volt = 3300  # mV
+	max_bin = 4096
+	V_mV = max_volt * (np.array(value_bin) / max_bin)
+	offset = 1650  # mV
+	sensor_gain = 5  # mV/Gauss
+	B = (V_mV - offset) / sensor_gain / 10000 # Tesla
 
-	#mu_0 = 4 * np.pi * 1e-7  # Tesla * m / A
-	#return B / mu_0  # A/m
-	return value_bin
+	mu_0 = 4 * np.pi * 1e-7  # Tesla * m / A
+	return B / mu_0  # A/m
+	#return value_bin
 
 #%% ===========================================================================
 # Proceso de Adquisición de Datos
@@ -206,20 +206,23 @@ class DataAdquisition(Process):
 
 		# Reabrir los puertos para la adquisición
 		self.open_serial_ports()				# abrir los puertos
-
+		self.total_iter = 0						# total de datos
 		# Bucle principal de adquisición de datos
 		while not self.stop_event.is_set():	# mientras no se reciba la señal de paro
 			for i in range(n_ports):				# para cada puerto
 				values, body = self.read_port_data(i)  # Leer datos de cada puerto
 				if body is not None:					# si se identifica el cuerpo
-					filtered_values = convert(values)	# convertir los valore
-					filtered_values = list(self.filters[body].apply(filtered_values) ) # Filtrar los datos
-					# llenar las colas de datos paralelas
-					buffer_acquisition[body].append(values)	# añadir los valores al buffer de adquisición
-					if self.enable_plot.is_set():					# si se activa el plot
-						buffer_plot[body].append(filtered_values)		# añadir los valores al buffer de plot
-					if self.enable_process.is_set():			# si se activa el procesamiento
-						buffer_process[body].append(filtered_values)	# añadir los valores al buffer de procesamiento
+					filtered_values = list(self.filters[body].apply(values) ) # Filtrar los datos
+					scaled_values = convert(filtered_values)	# convertir los valore
+
+					self.total_iter += 1						# incrementar el total de datos
+					if self.total_iter>100:				# si se tienen más de 1000 datos
+						# llenar las colas de datos paralelas
+						buffer_acquisition[body].append(values)	# añadir los valores al buffer de adquisición
+						if self.enable_plot.is_set():					# si se activa el plot
+							buffer_plot[body].append(scaled_values)		# añadir los valores escalados al plot
+						if self.enable_process.is_set():			# si se activa el procesamiento
+							buffer_process[body].append(filtered_values)	# añadir los valores al buffer de procesamiento
 
 			self.queue_plot, buffer_plot, _ =  buffer_management( # manejar el buffer de plot 
 				buffer_plot, self.enable_plot, self.queue_plot, 15)	#  con 10 datos
@@ -229,7 +232,8 @@ class DataAdquisition(Process):
 
 			self.queue_save, buffer_acquisition, n_it =  buffer_management( # manejar el buffer de adquisición
 				buffer_acquisition, self.enable_save, self.queue_save, 300,   # con 300 datos
-				True, n_it, start_time_loop)																	# imprimir los datos
+				True,   #True,  # seleccione si imprime o no. 
+				n_it, start_time_loop)																	# imprimir los datos
 
 			time.sleep(0.002)													# esperar 1 ms
 		else:	# si se recibe la señal de paro
@@ -358,7 +362,7 @@ class DataAlarm(Process):
  					# 2. PROCESAMIENTO DE LA MUESTRA SI ES SUFICIENTEMENTE GRANDE
 					if len(self.data) >= sample_size:    # Si se tiene el tamaño nesario de la muestra
 						# Convierte la muestra en un arreglo de NumPy para procesamiento
-						print(f"Algoritmo usado es {self.shared_alg.algorithm}")
+						#print(f"Algoritmo usado es {self.shared_alg.algorithm}")
 						if self.shared_alg.algorithm == "Algoritmo RMS":
 							rms = np.sqrt(np.mean(self.data ** 2, axis=0))  # Calcula el RMS de cada sensor
 							ymax = np.max(self.data, axis=0)  # Encuentra los valores máximos de cada sensor
@@ -366,10 +370,11 @@ class DataAlarm(Process):
 							# Identifica alarmas si los valores máximos exceden el umbral RMS + threshold
 							eval_alarmas = ymax > (rms + current_threshold)	# evaluar las alarmas
 						else:
+							#print(f"Algoritmo usado es {self.shared_alg.algorithm}")
 							std = np.std(self.data, axis=0)  # Calcula la desviación estándar de cada sensor
 							mean = np.mean(self.data, axis=0) # Calcula la media de cada sensor
-							value = data_array = data_array.reshape(data_array.shape[1],)
-							eval_alarmas = value  > (mean + 3*std) # evaluar las alarmas  
+							value = data_array.reshape(data_array.shape[1],)
+							eval_alarmas = value  > (mean + 6*std) # evaluar las alarmas  
 						alarms = eval_alarmas*1												# convertir a 0 y 1
 						alarms = alarms.reshape((len(alarms), 1))			# redimensionar
 						self.alarms.update({		# separar las alarmas por cuerpo

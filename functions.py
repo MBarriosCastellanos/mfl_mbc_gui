@@ -83,7 +83,7 @@ def ScanC_create(z_min, z_max, t_max):
   n_y = 10     # Número de puntos en el eje y
   y = np.linspace(1, 10, n_y)
   fig, ax = plt.subplots(3, 1, figsize=(6, 4), dpi=150, sharex=True)
-  fig.subplots_adjust(left=0.10, right=0.99, top=0.98, bottom=0.10, 
+  fig.subplots_adjust(left=0.10, right=1, top=0.98, bottom=0.10, 
     hspace=0.04)
   ax[2].set_xlabel("tiempo [s]")
   
@@ -92,6 +92,28 @@ def ScanC_create(z_min, z_max, t_max):
     ax[2 - i].set_ylim([0.5, 10.5])
     ax[2 - i].set_yticks(y)
     ax[2 - i].set_yticklabels(labels)
+
+  # Crear un ScalarMappable para la colorbar
+  norm = plt.Normalize(z_min, z_max)
+  fig.sm = plt.cm.ScalarMappable(cmap=cmap2, norm=norm)
+  fig.sm.set_array([])
+  
+  # Crear la colorbar una única vez
+  fig.cbar = fig.colorbar(fig.sm, ax=ax, pad=0.01, )
+  fig.cbar.set_label(label)
+  #fig.cbar.add_axes([0.87, 0.15, 0.03, 0.7])  # [left, bottom, width, height]
+
+  ## Inicializar un colorbar básico (se actualizará posteriormente)
+  #sm = plt.cm.ScalarMappable(cmap=cmap2)
+  #sm.set_array([])  # Array vacío inicialmente
+  ## Añadir colorbar a la figura
+  #cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])  # [left, bottom, width, height]
+  #cbar = fig.colorbar(sm, cax=cbar_ax)
+  #cbar.set_label(label)  # Usar la variable global label
+  #
+  ## Guarda el axis de la colorbar como propiedad de la figura para referencia futura
+  #fig.cbar_ax = cbar_ax
+
   return fig, ax
 
 def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
@@ -147,6 +169,22 @@ def ScanC_update(fig, ax, z_min, z_max, t_max, data, sampling_rate, auto_scale):
     mappables.append(cs)  # Guardar referencia al último mappable
 
   ax[0].set_xlim([0, t.max()])
+
+  # Actualizar colorbar existente (sin crear/eliminar)
+  if hasattr(fig, 'sm'):
+    fig.sm.set_norm(norm)  # Actualizar la normalizacion
+    fig.cbar.update_normal(fig.sm)  # Actualizar la colorbar
+
+  ## Limpiar colorbar anterior si existe
+  #if hasattr(fig, 'cbar_ax'):
+  #  fig.cbar_ax.clear()
+  #
+  #  # Crear nueva colorbar con los límites actualizados
+  #  #cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])  # [left, bottom, width, height]
+  #  sm = plt.cm.ScalarMappable(cmap=cmap2, norm=norm)
+  #  sm.set_array([])  # No se necesita un array real, solo los límites de norm
+  #  cbar = fig.colorbar(sm, cax=fig.cbar_ax)
+  #  cbar.set_label(label)  # Usar la variable global label
   
   return fig, ax
 
