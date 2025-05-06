@@ -1,0 +1,131 @@
+classDiagram
+    %% Clase principal de la interfaz
+    class MainInterFace {
+        %% Atributos principales
+        +root: Tk
+        +manager: Manager
+        +shared_alarms: dict
+        +manager_namespace: Namespace
+        +time_scale: IntVar
+        +mag_min: DoubleVar
+        +mag_max: DoubleVar
+        +plot_type: StringVar
+        +alg_type: StringVar
+        +alarm_threshold: Value('d')
+        +sampling_rate: int
+        +auto_scale: int
+        
+        %% Elementos de comunicación entre procesos
+        +queue_save: Queue
+        +queue_plot: Queue
+        +queue_process: Queue
+        +stop_event: Event
+        +enable_save: Event
+        +enable_plot: Event
+        +enable_process: Event
+        
+        %% Instancias de procesos
+        +data_adquisition: DataAdquisition
+        +data_saver: DataSaver
+        +data_process: DataAlarm
+        
+        %% Métodos principales
+        +create_frames()
+        +create_plot_controls()
+        +create_plot_main()
+        +create_plot_alarm()
+        +update_plot_main()
+        +update_plot_alarm()
+        +toggle_conect()
+        +toggle_alarm()
+        +toggle_save()
+        +switch_plot()
+    }
+    
+    %% Procesos que heredan de Process
+    class Process {
+        <<multiprocessing>>
+        +run()
+    }
+    
+    class DataAdquisition {
+        %% Atributos principales
+        +queue_save: Queue
+        +queue_plot: Queue
+        +queue_process: Queue
+        +stop_event: Event
+        +enable_save: Event
+        +enable_plot: Event
+        +enable_process: Event
+        +ports: list
+        +baudrate: int
+        +bin_msm_format: str
+        +filters: dict[LowPassFilter]
+        
+        %% Métodos principales
+        +run()
+        +identify_comm_mfl()
+        +publish_data_loop()
+        -open_serial_ports()
+        -close_serial_ports()
+        -read_port_data()
+        -decode_serial_message()
+    }
+    
+    class DataSaver {
+        %% Atributos principales
+        +queue_save: Queue
+        +run_event: Event
+        +name: str
+        +header_written: bool
+        
+        %% Métodos principales
+        +run()
+        -create_csv_file()
+    }
+    
+    class DataAlarm {
+        %% Atributos principales
+        +queue: Queue
+        +run_event: Event
+        +threshold: Value
+        +alarms: dict
+        +shared_alg: Namespace
+        +data: ndarray
+        
+        %% Métodos principales
+        +run()
+    }
+    
+    %% Clase auxiliar para filtrado
+    class LowPassFilter {
+        %% Atributos principales
+        +sf: int
+        +f: list
+        +btype: str
+        +num_sensors: int
+        +sb: ndarray
+        +sa: ndarray
+        +zi: ndarray
+        
+        %% Métodos principales
+        +apply(samples)
+        -_create_filter()
+    }
+    
+    %% Relaciones entre clases
+    Process <|-- DataAdquisition : hereda
+    Process <|-- DataSaver : hereda
+    Process <|-- DataAlarm : hereda
+    
+    MainInterFace --> DataAdquisition : crea/controla
+    MainInterFace --> DataSaver : crea/controla
+    MainInterFace --> DataAlarm : crea/controla
+    
+    DataAdquisition --> LowPassFilter : usa
+
+
+    
+
+    
+

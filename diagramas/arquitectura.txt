@@ -1,0 +1,86 @@
+---
+config:
+  layout: fixed
+---
+flowchart TD
+ subgraph Procesos["Procesos Paralelos (objects.py)"]
+        DAQ["DataAdquisition
+Adquisición de datos"]
+        DSave["DataSaver
+Guardado de datos"]
+        DAlarm["DataAlarm
+Detección de alarmas"]
+  end
+ subgraph Auxiliares["Componentes Auxiliares"]
+    direction TB
+        LPF["LowPassFilter
+    Filtrado de señal"]
+        Utils["Funciones Utilitarias
+    buffer_management, convert"]
+  end
+ subgraph IPC["Comunicación entre procesos"]
+    direction TB
+        Q_save["queue_save
+        Datos a guardar"]
+        Q_plot["queue_plot
+        Datos a graficar"]
+        Q_proc["queue_process
+        Datos para alarmas"]
+        Events["Events
+        enable_plot, 
+        enable_save,
+        enable_process, 
+        stop_event"]
+        SharedMem["Memoria compartida
+        acquisition_active
+        shared_alarms   
+        manager_namespace"]
+  end
+ subgraph Visualización["Componentes de visualización"]
+    direction TB
+        ScanA["ScanA_create/update 
+        Gráficas lineales"]
+        ScanC["ScanC_create/update
+        Mapas de calor"]
+        Alarm["Alarm_create/update
+    Visualizador de alarmas"]
+  end
+    Main["main.py
+Punto de entrada"] --> UI["interface.py
+Interfaz de usuario
+(MainInterFace)"]
+    UI --> Procesos & IPC & Func["functions.py
+Funciones de visualización"]
+    Procesos <--> IPC
+    Func --> Visualización
+    DAQ --> LPF & Utils
+    DAlarm --> Utils
+    HW["Hardware
+Sensores MFL"] <--> DAQ
+    DSave --> CSV["Archivos CSV
+Datos guardados"]
+    UI -.-> Visualización
+     DAQ:::process
+     DSave:::process
+     DAlarm:::process
+     LPF:::aux
+     Utils:::aux
+     Q_save:::comm
+     Q_plot:::comm
+     Q_proc:::comm
+     Events:::comm
+     SharedMem:::comm
+     ScanA:::viz
+     ScanC:::viz
+     Alarm:::viz
+     Main:::main
+     UI:::ui
+     HW:::external
+     CSV:::external
+    classDef main fill:#f96,stroke:#333,stroke-width:2px
+    classDef ui fill:#bbf,stroke:#333,stroke-width:2px
+    classDef process fill:#f9f,stroke:#333,stroke-width:2px
+    classDef aux fill:#bfb,stroke:#333,stroke-width:2px
+    classDef viz fill:#ff9,stroke:#333,stroke-width:2px
+    classDef comm fill:#fcc,stroke:#333,stroke-width:2px
+    classDef external fill:#ddd,stroke:#333,stroke-width:1px

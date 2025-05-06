@@ -29,6 +29,10 @@ class MainInterFace:
     # Initialize main window and configure fonts
     self.root = root                            # Ventana principal
     self.root.title("Adquisición de Datos MFL") # Título de la ventana
+    self.color_frame = "black"  # Color del frame gris verdoso
+    self.color_frame_letter = "white" # Color de letra gris claro
+    self.color_desable_letter = "#fc0000"
+    self.root.configure(bg=self.color_frame)  # configurar color 
     self.setup_fonts()                          # Configurar fuentes
 
     # inicialización de colas, eventos y procesos
@@ -39,7 +43,7 @@ class MainInterFace:
     self.data_adquisition = None  # Proceso de adquisición de datos
     self.data_saver = None        # Proceso de guardado de datos
     self.data_plot = None         # Datos para graficar
-    self.data_process = None      # Proceso de alarma de datos
+    self.data_process = None      # Proceso de alarma de dat#e8ede8os
 
     # banderas para ejecutar Procesos
     self.enable_save = Event()    # Activar/desactivar guardado
@@ -81,7 +85,7 @@ class MainInterFace:
     # Configuraciones iniciales
     self.sampling_rate = 300      # Frecuencia de muestreo de los sensores
     self.auto_scale = 1           # Autoescala activada por defecto
-    self.hex_color = "#CDCDCD"    # color default de botón desactivado
+    self.hex_color = "#e8ede8"    # color default de botón desactivado
     
     # Reemplazar la variable Tkinter con una compartida
     self.alarm_threshold = multiprocessing.Value('d', 40.0)
@@ -133,25 +137,25 @@ class MainInterFace:
     # | | |plot_graf_frame |plot_graf_alarm | |  self.image_frame        |
     # +----------------------------------------------------------------+ |
 
-    self.plot_frame = tk.Frame(self.root)   # Frame principal
+    self.plot_frame = tk.Frame(self.root, bg=self.color_frame)   # Frame principal
     self.plot_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
-    self.right_frame = tk.Frame(self.root)  # frame lado derecho
+    self.right_frame = tk.Frame(self.root, bg=self.color_frame)  # frame lado derecho
     self.right_frame.pack(side=tk.RIGHT, padx=8, pady=8)
 
-    self.plot_data_frame = tk.Frame(self.plot_frame)# frame lado izquierdo
+    self.plot_data_frame = tk.Frame(self.plot_frame, bg=self.color_frame )# frame lado izquierdo
     self.plot_data_frame.pack(side=tk.TOP, pady=3)
 
-    self.plot_graf_frame = tk.Frame(self.plot_frame) # grafico de datos
+    self.plot_graf_frame = tk.Frame(self.plot_frame, bg=self.color_frame) # grafico de datos
     self.plot_graf_frame.pack(side=tk.LEFT, pady=7, padx=7)
 
-    self.plot_graf_alarm = tk.Frame(self.plot_frame)  # grafico de alarmas
+    self.plot_graf_alarm = tk.Frame(self.plot_frame, bg=self.color_frame)  # grafico de alarmas
     self.plot_graf_alarm.pack(side=tk.RIGHT, pady=7, padx=3)
 
-    self.control_frame = tk.Frame(self.right_frame) #grafico de control
+    self.control_frame = tk.Frame(self.right_frame, bg=self.color_frame) #grafico de control
     self.control_frame.pack(side=tk.TOP, pady=5)
 
-    self.image_frame = tk.Frame(self.right_frame) # imagen estatica
+    self.image_frame = tk.Frame(self.right_frame, bg=self.color_frame) # imagen estatica
     self.image_frame.pack(side=tk.TOP, pady=5)
 
   def create_plot_controls(self):
@@ -168,7 +172,10 @@ class MainInterFace:
 
     # Control de la ventana de tiempo
     tk.Label(                   # Etiqueta para la ventana de tiempo
-      self.plot_data_frame, text="Ventana de tiempo").grid(
+      self.plot_data_frame, text="Ventana de tiempo", 
+      bg=self.color_frame, 
+      fg=self.color_frame_letter,
+      ).grid(
       row=1, column=0, padx=5, columnspan=2, sticky='ew')
     tk.Entry(                   # Entrada para la ventana de tiempo
       self.plot_data_frame, width=10, textvariable=self.time_scale).grid(
@@ -184,12 +191,16 @@ class MainInterFace:
     # Limites manuales de la escala
     self.scale_widgets_state = 'disabled'
     tk.Label(               # Etiqueta para los limites de la escala
-      self.plot_data_frame, text="Limites flujo magnetico [A/m]"
+      self.plot_data_frame, text="Limites flujo magnetico [A/m]",
+      bg=self.color_frame, 
+      fg=self.color_frame_letter,
       ).grid(row=1, column=2, columnspan=4, padx=5, sticky='ew')
     
     # Configuración del limite inferior de la grafica
     tk.Label(                     # Etiqueta para el limite inferior
-      self.plot_data_frame, text="Min"  # Texto de la etiqueta
+      self.plot_data_frame, text="Min",  # Texto de la etiqueta
+      bg=self.color_frame, 
+      fg=self.color_frame_letter,
       ).grid(row=2, column=2, padx=5)   # Posición de la etiqueta
     self.entry_ymin = tk.Entry(  # Entrada para el limite inferior
       self.plot_data_frame, width=10,   # Ubicar en el frame
@@ -199,7 +210,9 @@ class MainInterFace:
 
     # Configuración del limite superior de la grafica
     tk.Label(                   # Etiqueta para el limite superior
-      self.plot_data_frame, text="Max"  # Texto de la etiqueta
+      self.plot_data_frame, text="Max",  # Texto de la etiqueta
+      bg=self.color_frame, 
+      fg=self.color_frame_letter,
       ).grid(row=2, column=4, padx=5)   # Posición de la etiqueta
     self.entry_ymax = tk.Entry( # Entrada para el limite superior
       self.plot_data_frame, width=10,   # Ubicar en el frame
@@ -230,13 +243,13 @@ class MainInterFace:
     # | +----------------+ +-------+ +-------+ +-------+ +-------+ +-----+ |
     # Botón de Conección principal ---------------------------------------
     self.btn_conect = tk.Button(self.control_frame, 
-                                disabledforeground="#8B0000",  # Color de texto cuando está deshabilitado
+                                disabledforeground=self.color_desable_letter,  # Color de texto cuando está deshabilitado
                                 text="Conectar", bg=self.hex_color,
                                 command=self.toggle_conect, width=13,)
     self.btn_conect.grid(row=0, column=0, padx=5, columnspan=6, sticky='ew')
     # Botón para activar la alarma ----------------------------------------
     self.btn_alarm = tk.Button(self.control_frame, 
-                                disabledforeground="#8B0000",  # Color de texto cuando está deshabilitado
+                                disabledforeground=self.color_desable_letter,  # Color de texto cuando está deshabilitado
                                 text="Alarma", bg=self.hex_color,
                                 state="disable", 
                                 command=self.toggle_alarm, width=9, )
@@ -271,11 +284,14 @@ class MainInterFace:
     # save data ----------------------------------------------------------------
     self.btn_save = tk.Button(self.control_frame, text="Guardar", 
                               state="disable",
-                              disabledforeground="#8B0000",  # Color de texto cuando está deshabilitado
+                              disabledforeground=self.color_desable_letter,  # Color de texto cuando está deshabilitado
                               bg=self.hex_color, command=self.toggle_save, width=9)
     self.btn_save.grid(row=2, column=0, padx=5)
 
-    self.label_save = tk.Label(self.control_frame, text="Archivo")
+    self.label_save = tk.Label(self.control_frame, text="Archivo", 
+                                bg=self.color_frame, 
+                                fg=self.color_frame_letter,
+                               )
     self.label_save.grid(row=2, column=1, padx=5, columnspan=2)
     self.save_entry = tk.Entry(self.control_frame, 
                                width=15, textvariable=self.file_name)

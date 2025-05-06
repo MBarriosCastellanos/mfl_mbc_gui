@@ -1,0 +1,46 @@
+flowchart TD
+    %% Entrada de datos
+    Sensors[Sensores MFL] -->|Datos binarios| SerialComm[Comunicación Serial]
+    SerialComm -->|struct.unpack| RawData[Datos Binarios Brutos]
+    
+    %% Procesamiento de datos
+    RawData -->|LowPassFilter| FilteredData[Datos Filtrados]
+    FilteredData -->|convert| ConvertedData[Campo Magnético en A/m]
+    
+    %% Distribución a procesos
+    ConvertedData --> PlotData[Cola para visualización]
+    RawData --> SaveData[Cola para guardado]
+    FilteredData --> AlarmData[Cola para alarmas]
+    
+    %% Procesamiento en procesos individuales
+    PlotData -->|queue_plot| VisProc[Proceso Visualización]
+    SaveData -->|queue_save| SaveProc[Proceso Guardado]
+    AlarmData -->|queue_process| AlarmProc[Proceso Alarmas]
+    
+    %% Transformaciones en proceso de plot
+    VisProc --> ScanSelect{plot_type?}
+    ScanSelect -->|"Scan A"| ScanA[ScanA_update]
+    ScanSelect -->|"Scan C"| ScanC[ScanC_update]
+    ScanA --> LineGraph[Gráfico de líneas]
+    ScanC --> ContourMap[Mapa de contornos]
+    
+    %% Transformaciones en proceso de alarma
+    AlarmProc --> AlgSelect{algorithm?}
+    AlgSelect -->|"Algoritmo RMS"| RMSCalc[Cálculo RMS]
+    AlgSelect -->|"Algoritmo STD"| STDCalc[Cálculo STD]
+    RMSCalc --> ThresholdComp[Comparación con umbral]
+    STDCalc --> ThresholdComp
+    ThresholdComp --> AlarmStatus[Estado de alarmas]
+    AlarmStatus -->|shared_alarms| AlarmDisplay[Visualización alarma]
+    
+    %% Transformaciones en proceso de guardado
+    SaveProc --> CSVFile[Archivo CSV]
+    
+    %% Estilo
+    classDef process fill:#f9f,stroke:#333,stroke-width:2px
+    classDef data fill:#bbf,stroke:#333,stroke-width:1px
+    classDef transformation fill:#bfb,stroke:#333,stroke-width:1px
+    
+    class SerialComm,VisProc,SaveProc,AlarmProc process
+    class RawData,FilteredData,ConvertedData,PlotData,SaveData,AlarmData data
+    class LowPassFilter,ScanA,ScanC,RMSCalc,STDCalc transformation

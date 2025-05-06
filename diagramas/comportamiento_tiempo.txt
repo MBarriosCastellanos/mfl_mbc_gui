@@ -1,0 +1,101 @@
+sequenceDiagram
+    %% Participantes
+    actor User
+    participant UI as MainInterFace
+    participant DataAcq as DataAdquisition
+    participant DataSave as DataSaver
+    participant DataAlm as DataAlarm
+    participant Vis as Visualización
+    
+    %% Inicialización de la aplicación
+    User->>UI: Ejecutar aplicación
+    activate UI
+    UI->>UI: create_frames()
+    UI->>UI: create_plot_controls()
+    UI->>UI: create_plot_main()
+    UI->>UI: create_plot_alarm()
+    UI->>UI: create_control_buttons()
+    UI->>UI: create_image_display()
+    UI->>UI: update_plot_real_time() [Timer]
+    
+    %% Conexión a los sensores
+    User->>UI: Presiona "Conectar"
+    UI->>DataAcq: create + start() 
+    activate DataAcq
+    DataAcq->>DataAcq: identify_comm_mfl()
+    Note over DataAcq: Busca e identifica los puertos para cada cuerpo (1-3)
+    DataAcq->>DataAcq: publish_data_loop()
+    Note over DataAcq: Lectura continua de datos en background
+    DataAcq-->>UI: acquisition_active.value = True
+    UI->>UI: btn_conect = "Conectado"
+    UI->>UI: Habilita alarma y guardado
+    
+    %% Bucle de adquisición y visualización
+    loop Cada 33ms mientras está conectado
+        DataAcq->>UI: queue_plot.put(data)
+        UI->>UI: update_plot_main()
+        UI->>Vis: ScanA_update() o ScanC_update()
+        activate Vis
+        Vis-->>UI: Actualiza gráfica principal
+        deactivate Vis
+    end
+    
+    %% Activación de alarma
+    User->>UI: Presiona "Alarma"
+    UI->>DataAlm: create + start()
+    activate DataAlm
+    UI->>UI: btn_alarm = "Al. Activa"
+    
+    loop Mientras alarma está activa
+        DataAcq->>DataAlm: queue_process.put(data)
+        DataAlm->>DataAlm: Procesa data según algoritmo
+        DataAlm->>DataAlm: Evalúa si hay alarmas
+        alt Si hay alarma
+            DataAlm->>DataAlm: winsound.Beep()
+        end
+        DataAlm-->>UI: shared_alarms.update()
+        UI->>UI: update_plot_alarm()
+        UI->>Vis: Alarm_update()
+        activate Vis
+        Vis-->>UI: Actualiza gráfica de alarmas
+        deactivate Vis
+    end
+    
+    %% Activación de guardado
+    User->>UI: Presiona "Guardar"
+    UI->>DataSave: create + start()
+    activate DataSave
+    UI->>UI: btn_save = "Guardando"
+    
+    loop Mientras guardado está activo
+        DataAcq->>DataSave: queue_save.put(data)
+        DataSave->>DataSave: Guarda datos en CSV
+    end
+    
+    %% Desactivación de alarmas
+    User->>UI: Presiona "Al. Activa"
+    UI->>DataAlm: enable_process.clear()
+    UI->>DataAlm: join()
+    deactivate DataAlm
+    UI->>UI: btn_alarm = "Alarma"
+    
+    %% Desactivación de guardado
+    User->>UI: Presiona "Guardando"
+    UI->>DataSave: enable_save.clear()
+    UI->>DataSave: join()
+    deactivate DataSave
+    UI->>UI: btn_save = "Guardar"
+    
+    %% Desconexión
+    User->>UI: Presiona "Conectado"
+    UI->>UI: stop_event.set()
+    UI->>UI: enable_plot.clear()
+    UI->>DataAcq: join()
+    deactivate DataAcq
+    UI->>UI: btn_conect = "Conectar"
+    
+    %% Cierre de la aplicación
+    User->>UI: Cierra ventana
+    UI->>UI: on_closing()
+    Note over UI: Finaliza todos los procesos activos
+    deactivate UI

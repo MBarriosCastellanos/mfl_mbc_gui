@@ -1,0 +1,53 @@
+classDiagram
+    %% Clases principales
+    MainInterFace <-- DataAdquisition : usa
+    MainInterFace <-- DataSaver : usa
+    MainInterFace <-- DataAlarm : usa
+    
+    %% Funciones de visualización
+    class FunctionLibrary {
+        ScanA_create()
+        ScanA_update()
+        ScanC_create()
+        ScanC_update()
+        Alarm_create()
+        Alarm_update()
+        verify_empty()
+    }
+    
+    %% Clases de procesamiento
+    class DataAdquisition {
+        +run()
+        +identify_comm_mfl()
+        +publish_data_loop()
+        -open_serial_ports()
+        -close_serial_ports()
+        -read_port_data()
+    }
+    
+    class DataSaver {
+        +run()
+        -create_csv_file()
+    }
+    
+    class DataAlarm {
+        +run()
+    }
+    
+    class LowPassFilter {
+        +apply()
+        -_create_filter()
+    }
+    
+    %% Transformaciones auxiliares
+    class Transformations {
+        +convert()
+        +buffer_management()
+    }
+    
+    %% Relaciones
+    DataAdquisition --> LowPassFilter : usa
+    DataAdquisition --> Transformations : usa convert()
+    MainInterFace --> FunctionLibrary : usa funciones de visualización
+    DataAlarm --> Transformations : usa algoritmos
+    DataAdquisition ..> buffer_management : utiliza

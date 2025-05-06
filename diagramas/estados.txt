@@ -1,0 +1,35 @@
+stateDiagram
+    [*] --> Inactivo: Inicio
+    
+    Inactivo --> Conectando: btn_conect / Conectar
+    Conectando --> Conectado: acquisition_active = True
+    
+    Conectado --> Inactivo: btn_conect / Desconectar
+    
+    Conectado --> Conectado&Alarma: btn_alarm / Activar Alarma
+    Conectado&Alarma --> Conectado: btn_alarm / Desactivar Alarma
+    
+    Conectado --> Conectado&Guardando: btn_save / Guardar
+    Conectado&Guardando --> Conectado: btn_save / Detener Guardado
+    
+    Conectado&Alarma --> Conectado&Alarma&Guardando: btn_save / Guardar
+    Conectado&Alarma&Guardando --> Conectado&Alarma: btn_save / Detener Guardado
+    
+    Conectado&Guardando --> Conectado&Alarma&Guardando: btn_alarm / Activar Alarma
+    Conectado&Alarma&Guardando --> Conectado&Guardando: btn_alarm / Desactivar Alarma
+    
+    Inactivo --> [*]: on_closing
+    Conectado --> [*]: on_closing
+    Conectado&Alarma --> [*]: on_closing
+    Conectado&Guardando --> [*]: on_closing
+    Conectado&Alarma&Guardando --> [*]: on_closing
+
+
+stateDiagram
+        state Opciones {
+        ScanA --> ScanC: plot_t&pe.set("Scan C")
+        ScanC --> ScanA: plot_t&pe.set("Scan A")
+        
+        AutoEscala --> AjusteManual: toggle_autoscale
+        AjusteManual --> AutoEscala: toggle_autoscale
+    }

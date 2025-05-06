@@ -5,17 +5,50 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.colors import BoundaryNorm
 import numpy as np
-colors = [(0,    (1, 1, 1)),       # Green
-          (1,    (1,     0, 0))]      # red
+
+import matplotlib as mpl
+
+# Configurar parámetros globales
+mpl.rcParams.update({
+    # Colores de fondo
+    'figure.facecolor': 'black',
+    'axes.facecolor': 'black',
+    
+    # Color del borde del marco (axes edge)
+    'axes.edgecolor': '#bac2ba',
+    
+    # Ciclo de colores para las líneas (10 primeros)
+    'axes.prop_cycle': mpl.cycler(color=[
+      '#FF9933',  # Naranja (0°-30°)
+      '#FFD700',  # Oro (50°)
+      '#FFFF33',  # Amarillo (60°)
+      '#CCFF00',  # Lima (75°)
+      '#ADFF2F',  # Verde-amarillo (85°)
+      '#39FF14',  # Verde (120°)
+      '#00FFFF',  # Cian (180°)
+      '#00CCFF',  # Azul claro (195°)
+      '#FF66FF',  # Rosa (300°)
+      '#FF33CC',  # Magenta (320°)
+    ]),
+    
+    # Estilo de texto y ejes
+    'text.color': 'white',           # Color del texto
+    'axes.labelcolor': 'white',    # Color de etiquetas de ejes
+    'xtick.color': 'white',        # Color de marcas eje X
+    'ytick.color': 'white'         # Color de marcas eje Y
+})
+
+colors = [(0,    (0, 0, 0)),       # Green
+          (1,    (0,     1, 0))]      # red
 cmap1 = LinearSegmentedColormap.from_list('custom_cmap', colors, N=2)
 labels = [f's{i+1}' for i in range(10)]
 label= 'Campo Magnético [kA/m]'
 
-colors2 = [(0,    (0,    0.5, 0)),      # Green
-          (0.25, (0.35, 0.7, 0)),       # Light green
-          (0.5,  (0.95,   0.95, 0)),    # yellow
-          (0.75, (0.7, 0.35, 0)),       # orange
-          (1,    (0.5,     0, 0))]      # red
+colors2 = [(0,    (0,    1, 0)),      # Green
+          (0.25, (0.8, 1, 0)),       # Light green
+          (0.5,  (1,   1, 0)),    # yellow
+          (0.75, (1, 0.5, 0)),       # orange
+          (1,    (1,   0, 0))]      # red
 cmap2 = LinearSegmentedColormap.from_list('custom_cmap', colors2, 
                                           N=7
                                           )
