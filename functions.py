@@ -38,17 +38,18 @@ mpl.rcParams.update({
     'ytick.color': 'white'         # Color de marcas eje Y
 })
 
-colors = [(0,    (0, 0, 0)),       # Green
-          (1,    (0,     1, 0))]      # red
-cmap1 = LinearSegmentedColormap.from_list('custom_cmap', colors, N=2)
+colors1 = [(0, (0, 0, 0)),    
+           (0.5, (0, 0.5, 0)),
+          (1, (0, 1, 0))]     
+cmap1 = LinearSegmentedColormap.from_list('custom_cmap', colors1, N=2)
 labels = [f's{i+1}' for i in range(10)]
 label= 'Campo Magnético [kA/m]'
 
-colors2 = [(0,    (0,    1, 0)),      # Green
+colors2 = [(0, (0, 1, 0)),      # Green
           (0.25, (0.8, 1, 0)),       # Light green
-          (0.5,  (1,   1, 0)),    # yellow
+          (0.5, (1, 1, 0)),    # yellow
           (0.75, (1, 0.5, 0)),       # orange
-          (1,    (1,   0, 0))]      # red
+          (1, (1, 0, 0))]      # red
 cmap2 = LinearSegmentedColormap.from_list('custom_cmap', colors2, 
                                           N=7
                                           )
