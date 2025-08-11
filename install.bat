@@ -5,7 +5,7 @@ REM -------------------------------
 echo Verificando si PyInstaller está instalado...
 pyinstaller --version >nul 2>&1
 if errorlevel 1 (
-    echo PyInstaller no est&aacute; instalado. Instalando...
+    echo PyInstaller no esta instalado; instalado. Instalando...
     python -m pip install pyinstaller
     if errorlevel 1 (
         echo Error al instalar PyInstaller.
@@ -13,7 +13,7 @@ if errorlevel 1 (
         exit /b 1
     )
 ) else (
-    echo PyInstaller ya est&aacute; instalado.
+    echo PyInstaller ya esta instalado; instalado.
 )
 
 REM -------------------------------
@@ -31,7 +31,7 @@ REM -------------------------------
 REM Verificar que se haya creado la carpeta dist
 REM -------------------------------
 if not exist "dist" (
-    echo La carpeta "dist" no se encontr&oacute;.
+    echo La carpeta "dist" no se encuentra instalada ;.
     pause
     exit /b 1
 )
