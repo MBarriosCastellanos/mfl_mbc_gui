@@ -46,7 +46,7 @@ def convert(value_bin):
 	max_bin = 4096
 	V_mV = max_volt * (np.array(value_bin) / max_bin)
 	offset = 1650  # mV
-	sensor_gain = 5  # mV/Gauss
+	sensor_gain = 9  # mV/Gauss
 	B = (V_mV - offset) / sensor_gain / 10000 # Tesla
 
 	mu_0 = 4 * np.pi * 1e-7  # Tesla * m / A
