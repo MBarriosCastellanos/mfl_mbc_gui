@@ -63,6 +63,9 @@ class MainInterFace:
     self.plot_type = tk.StringVar(value="Scan A") # Tipo de gráfico inicia
     self.alg_type = tk.StringVar(value="Algoritmo RMS") # Tipo de algoritmo
 
+    # Initialize variables para desabilitar sensores
+    self.disabled_bodies = [tk.StringVar(value="") for _ in range(10)]
+    self.disabled_sensors = [tk.StringVar(value="") for _ in range(10)]
 
     # Establece el tipo de grafico a Scan A o Scan C, escribe la variable 
     self.plot_type.trace_add("write", self.switch_plot) #escribe self.plot_type
@@ -98,6 +101,7 @@ class MainInterFace:
     self.create_plot_alarm()      # Crear Gráfico de alarmas
     self.create_control_buttons() # Botones de control
     self.create_image_display()   # Imagen estática
+    self.create_disable_frame()  # Frame para desabilitar sensores
 
     # Start the data acquisition and plot update
     self.update_plot_real_time()  # Update every 100 ms for smooth real-time effect
@@ -141,7 +145,7 @@ class MainInterFace:
     self.plot_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
     self.right_frame = tk.Frame(self.root, bg=self.color_frame)  # frame lado derecho
-    self.right_frame.pack(side=tk.RIGHT, padx=8, pady=8)
+    self.right_frame.pack(side=tk.RIGHT, padx=8, pady=10)
 
     self.plot_data_frame = tk.Frame(self.plot_frame, bg=self.color_frame )# frame lado izquierdo
     self.plot_data_frame.pack(side=tk.TOP, pady=3)
@@ -155,11 +159,34 @@ class MainInterFace:
     self.control_frame = tk.Frame(self.right_frame, bg=self.color_frame) #grafico de control
     self.control_frame.pack(side=tk.TOP, pady=5)
 
+    self.deseable_frame = tk.Frame(self.right_frame, bg=self.color_frame) # imagen estatica
+    self.deseable_frame.pack(side=tk.LEFT, pady=5, padx=2)
+
     self.image_frame = tk.Frame(self.right_frame, bg=self.color_frame) # imagen estatica
-    self.image_frame.pack(side=tk.TOP, pady=5)
+    self.image_frame.pack(side=tk.RIGHT, pady=5, padx=6)
 
   def create_plot_controls(self):
     """" Crea los controles para el gráfico principal """
+    # -----------------------------------------------------
+    # Estructura Grid de plot_data_frame (6 columnas)
+    # +--------------------------------------------------------------+ |
+    # | [Row 0]                                                      | |
+    # | +---------------+ +------------------+ +---------------------+ |
+    # | | Combobox Scan | | Botón Ajustar    | | Combobox Algoritmo  | |
+    # | |  (cols 0-1)   | | Escala (cols 2-3)| | (cols 4-5)          | |
+    # | +---------------+ +------------------+ +---------------------+ |    
+    # | [Row 1]                                                      | |
+    # | +---------------------+ +------------------------------------+ |
+    # | |   Label Ventana     | |   Label Límites                    | |
+    # | |     (cols 0-1)      | |     (cols 2-5)                     | |
+    # | +---------------------+ + -----------------------------------+ |
+    # | [Row 2]                                                      | |
+    # | +--------------------------------+ +----+ +----+ +----+ +----+ |
+    # | |           Entry                | |Lbl | |Ent | |Lbl | |Ent | |
+    # | |          Ventana               | |Min | |Min | |Max | |Max | |
+    # | |          (col0-3)              | |(c2)| |(c3)| |(c4)| |(c5)| |
+    # | +--------------------------------+ +----+ +----+ +----+ +----+ |
+    # +---------------------------------------------------+
     # Control para seleccionar el tipo de scan (grafico) a ser usado
     ttk.Combobox(self.plot_data_frame, textvariable=self.plot_type, 
                   values=["Scan A", "Scan C"], state="readonly").grid(
@@ -222,25 +249,27 @@ class MainInterFace:
 
   def create_control_buttons(self):
     """Crea los botones de control en el frame de control"""
-    # --------------------------------------------------------------------
-    # Estructura Grid de plot_data_frame (6 columnas)
-    # +------------------------------------------------------------------+
-    # | [Row 0]                                                           |
-    # | +----------------+ +----------------+ +-------------------------+ |
-    # | |  Combobox      | |                | | Botón Ajustar Escala    | |
-    # | | (cols 0-1)     | |      -         | | (cols 2-3)              | |
-    # | +----------------+ +----------------+ +-------------------------+ |
-    # | [Row 1]                                                           |
-    # | +----------------+ +----------------+ +-------------------------+ |
-    # | | Label Ventana  | | Label Límites  | |                         | |
-    # | | Tiempo         | | Mag (cols 2-5) | |                         | |
-    # | | (cols 0-1)     | |                | |                         | |
-    # | +----------------+ +----------------+ +-------------------------+ |
-    # | [Row 2]                                                           |
-    # | +----------------+ +-------+ +-------+ +-------+ +-------+ +-----+ |
-    # | | Entry Tiempo   | | Min   | | Entry | | Max   | | Entry | |     | |
-    # | | (cols 0-1)     | | (col2)| | (col3)| | (col4)| | (col5)| |     | |
-    # | +----------------+ +-------+ +-------+ +-------+ +-------+ +-----+ |
+    # -----------------------------------------------------
+    # Estructura Grid de control_frame (6 columnas)
+    # +-------------------------------------------------+ |
+    # | [Row 0]                                         | |
+    # | +-----------------------------------------------+ |
+    # | |                    Botón Conectar             | |
+    # | |                   (cols 0-5)                  | |
+    # | +-----------------------------------------------+ |    
+    # | [Row 1]                                         | |
+    # | +--------+ +----+ +----+ +--------+ +----+ +----+ |
+    # | | Botón  | | -5 | | -1 | | Entry  | | +1 | | +5 | |
+    # | | Alarma | |    | |    | | Alarma | |    | |    | |
+    # | | (col0) | |(c1)| |(c2)| | (col3) | |(c4)| |(c5)| |
+    # | +--------+ +----+ +----+ +--------+ +----+ +----+ |
+    # | [Row 2]                                         | |
+    # | +--------+ +--------+ +--------+ +--------------+ |
+    # | | Botón  | | Label  | |        | | Entry Archivo| |
+    # | |Guardar | |Archivo | |        | | (cols 3-5)   | |
+    # | | (col0) | |(col1-2)| |        | |              | |
+    # | +--------+ +--------+ +--------+ +--------------+ |
+    # +---------------------------------------------------+
     # Botón de Conección principal ---------------------------------------
     self.btn_conect = tk.Button(self.control_frame, 
                                 disabledforeground=self.color_desable_letter,  # Color de texto cuando está deshabilitado
@@ -304,9 +333,13 @@ class MainInterFace:
       self.auto_scale_button.config(text="Autoescala")
       self.auto_scale = 0
       self.scale_widgets_state = 'normal'
+    elif self.auto_scale_button.config('text')[-1] == "Autoescala":
+      self.auto_scale_button.config(text="Esc. Separada")
+      self.auto_scale = 1
+      self.scale_widgets_state = 'disable'
     else:
       self.auto_scale_button.config(text="Ajustar Escala")
-      self.auto_scale = 1
+      self.auto_scale = 2
       self.scale_widgets_state = 'disable'
     
     # Enable or disable manual scale entries based on autoscale state
@@ -461,6 +494,34 @@ class MainInterFace:
           # Calcular en numero e muestras en el eje del tiempo
           max_samples = time_scale * self.sampling_rate
 
+          # determinar sensores a desabilitar - VERSIÓN MÁS EFICIENTE
+          disable_indices = set()
+          for body, sensor in zip(self.disabled_bodies, 
+                                  self.disabled_sensors):
+            body_val = body.get()       # nombre del cuerpo
+            sensor_val = sensor.get()   # nombre deln sensor
+            if body_val and sensor_val:  # si los dos existen
+              body_idx = int(body_val[1]) - 1       # B1->0, B2->1, B3->2
+              sensor_idx = int(sensor_val[1:]) - 1  # s1->0, s2->1, ..., s10->9
+              disable_indices.add(body_idx * 10 + sensor_idx)
+
+          #print("Sensores deshabilitados:", sorted(disable_indices))
+
+          # Reemplazar sensores deshabilitados por la media de los activos
+          if disable_indices:  # Solo si hay sensores deshabilitados
+            disable_indices_list = list(disable_indices)
+            # Crear máscara de sensores activos (no deshabilitados)
+            active_mask = np.ones(data_array.shape[1], dtype=bool)
+            active_mask[disable_indices_list] = False
+            
+            # Calcular media de sensores activos para cada fila
+            if np.any(active_mask):  # Verificar que hay al menos un sensor activo
+              active_mean = np.mean(data_array[:, active_mask], axis=1, keepdims=True)
+              # Reemplazar columnas deshabilitadas con la media
+              data_array[:, disable_indices_list] = active_mean
+
+          #print("Data array shape:", data_array.shape)
+
           # Actualizar los datos del gráfico
           if self.data_plot is None:  # Si no hay datos, asignar los nuevos
             self.data_plot = data_array
@@ -517,14 +578,33 @@ class MainInterFace:
     """Crea un marco para mostrar una imagen estática."""
     img_path = "figures/mfl_sup.jpg"  # Ensure this path is correct
     img = Image.open(img_path)        # Open the image
-    img = img.resize((730,            # Resize the image
-                      int((730 / float(img.size[0])) * img.size[1])), 
+    img = img.resize((500,            # Resize the image
+                      int((500 / float(img.size[0])) * img.size[1])), 
                       Image.Resampling.LANCZOS)
     img = ImageTk.PhotoImage(img)     # Convert the image to PhotoImage
     
     img_label = tk.Label(self.image_frame, image=img) # Create a label
     img_label.pack(side=tk.TOP, pady=2)               # Pack the label
     img_label.image = img                             # Save a reference
+
+  def create_disable_frame(self):
+    """Crea un marco para poder desabilitar hasta 6 sensores de la herramienta MFL """
+    bodies = [""] + [f"B{i}" for i in range(1, 4)]
+    sensors = [""] + [f"s{i}" for i in range(1, 11)]
+
+    tk.Label(self.deseable_frame, text="Desabilitar",  font=("TkDefaultFont", 15),
+        bg=self.color_frame, fg="white").grid(row=0, column=0, padx=2, columnspan=2)
+    tk.Label(self.deseable_frame, text="Sensores", font=("TkDefaultFont", 15),
+        bg=self.color_frame, fg="white").grid(row=1, column=0, padx=2, columnspan=2)
+    # Crear todos los botones de ajuste de la alarma------------------------
+    for i, (sensor, body) in enumerate(
+                          zip(self.disabled_sensors, self.disabled_bodies)):
+      ttk.Combobox(self.deseable_frame, textvariable=body,
+                    values=bodies, state="readonly", width=2).grid(
+                      row=i+2, column=0, padx=2)
+      ttk.Combobox(self.deseable_frame, textvariable=sensor,
+                    values=sensors, state="readonly", width=3).grid(
+                      row=i+2, column=1, padx=2)
 
   def adj_alarm(self, delta):
     """Ajusta el valor de la alarma en la entrada de la alarma."""

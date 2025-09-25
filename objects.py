@@ -57,198 +57,271 @@ def convert(value_bin):
 # Proceso de Adquisición de Datos
 # =============================================================================
 class DataAdquisition(Process):
-	def __init__(self, queue_save, queue_plot,  queue_process, stop_event, 
-							enable_plot=Event(), enable_process=Event(), enable_save=Event(),
-							acquisition_active=None):
-		""" Inicializa el proceso de adquisición de datos.
-		:param queue_save: Cola para enviar datos al proceso de guardado.
-		:param queue_plot: Cola para enviar datos al proceso de plot.
-		:param stop_event: Evento para detener el proceso.
-		:param enable_save: Si True se activará los datos para guardar.
-		:param enable_plot: Si True se activará el plot en tiempo real.
-		:param enable_process: Si True se activará el procesamiento de los datos.
-		"""
-		super().__init__()
-		self.queue_save = queue_save        # Fila para guardar los datos
-		self.queue_plot = queue_plot        # Fila para plotar los datos
-		self.queue_process = queue_process  # Fila para processar los datos
-		self.stop_event = stop_event        # evento de los dtaos
+  def __init__(self, queue_save, queue_plot,  queue_process, stop_event, 
+              enable_plot=Event(), enable_process=Event(), enable_save=Event(),
+              acquisition_active=None,
+              real_data=True,
+        ):
+    """ Inicializa el proceso de adquisición de datos.
+    :param queue_save: Cola para enviar datos al proceso de guardado.
+    :param queue_plot: Cola para enviar datos al proceso de plot.
+    :param stop_event: Evento para detener el proceso.
+    :param enable_save: Si True se activará los datos para guardar.
+    :param enable_plot: Si True se activará el plot en tiempo real.
+    :param enable_process: Si True se activará el procesamiento de los datos.
+    """
+    super().__init__()
+    self.queue_save = queue_save        # Fila para guardar los datos
+    self.queue_plot = queue_plot        # Fila para plotar los datos
+    self.queue_process = queue_process  # Fila para processar los datos
+    self.stop_event = stop_event        # evento de los dtaos
 
-		# Formato y parámetros de comunicación
-		self.bin_msm_format = ">10Hc2c"     # Formato del mensaje binario    
-		self.baudrate = 115200              # Velocidad de transmisión
-		self.msm_size = struct.calcsize(    # El tamaño del mensaje es el 
-			self.bin_msm_format             #   tamaño del struct más la 
-			) + len(";****".encode())       #   longitud de la marca de fin
+    # Formato y parámetros de comunicación
+    self.bin_msm_format = ">10Hc2c"     # Formato del mensaje binario    
+    self.baudrate = 115200              # Velocidad de transmisión
+    self.msm_size = struct.calcsize(    # El tamaño del mensaje es el 
+      self.bin_msm_format             #   tamaño del struct más la 
+      ) + len(";****".encode())       #   longitud de la marca de fin
 
-		# Lista de puertos Comm disponibles 
-		self.ports = [port.device for port in list_ports.comports()]
-		
-		# Estas variables se inicializarán al abrir los puertos
-		self.serial_connections = []        # Lista de conexiones seriales
-		self.buffers = []                   # Buffer para cada conexión
+    # Lista de puertos Comm disponibles 
+    self.ports = [port.device for port in list_ports.comports()]
+    
+    # Estas variables se inicializarán al abrir los puertos
+    self.serial_connections = []        # Lista de conexiones seriales
+    self.buffers = []                   # Buffer para cada conexión
 
-		# Flags para activar el guardado y el plot
-		self.enable_save = enable_save          # habilitar fila de guardado 
-		self.enable_plot = enable_plot          # habilitar fila de plotadp
-		self.enable_process = enable_process    # habilitar fila de procesado
+    # Flags para activar el guardado y el plot
+    self.enable_save = enable_save          # habilitar fila de guardado 
+    self.enable_plot = enable_plot          # habilitar fila de plotadp
+    self.enable_process = enable_process    # habilitar fila de procesado
 
-		# Variable booleana compartida (tipo multiprocessing.Value)
-		self.acquisition_active = acquisition_active # Monitorea la adquisición de datos
+    # Variable booleana compartida (tipo multiprocessing.Value)
+    self.acquisition_active = acquisition_active # Monitorea la adquisición de datos
 
-		# definir filtros para cada cuerpo
-		self.filters = {i: LowPassFilter() for i in range(3)}
+    # definir filtros para cada cuerpo
+    self.filters = {i: LowPassFilter() for i in range(3)}
+    
+    # Si es True, usa datos reales; si es False, simula datos
+    self.real_data = real_data
 
-	def open_serial_ports(self):
-		"""Abre los puertos serial disponibles y crea un buffer para cada uno."""
-		ports_orig = self.ports.copy()          # Puertos aceptados
-		self.ports = []                         # nuevos puertos
-		self.serial_connections = []            # buffers para almecenamiento
-		for port in ports_orig:                 # puertos disponibles
-			try:                                  # intente abrir los puertos
-				comm = serial.Serial(               #  abrir el puerto
-					port=port,												#  puerto					
-					baudrate=self.baudrate,						#  velocidad de transmisión
-					parity=serial.PARITY_NONE,				#  paridad
-					stopbits=serial.STOPBITS_ONE,			#  bits de parada
-					bytesize=serial.EIGHTBITS,				#	tamaño de los bytes	
-					timeout=0.1												#  tiempo de espera										
-				)
-				self.serial_connections.append(comm) 	#	añadir la conexión
-				self.ports.append(port)								# añadir el puerto
-				print(f"Puerto {port} abierto exitosamente.")
-			except Exception as e:					# si no se puede abrir el puerto
-				print(f"No se pudo abrir el puerto {port}: {e}")
-		self.buffers = [bytearray() for _ in self.ports]
+  def open_serial_ports(self):
+    """Abre los puertos serial disponibles y crea un buffer para cada uno."""
+    ports_orig = self.ports.copy()          # Puertos aceptados
+    self.ports = []                         # nuevos puertos
+    self.serial_connections = []            # buffers para almecenamiento
+    for port in ports_orig:                 # puertos disponibles
+      try:                                  # intente abrir los puertos
+        comm = serial.Serial(               #  abrir el puerto
+          port=port,												#  puerto					
+          baudrate=self.baudrate,						#  velocidad de transmisión
+          parity=serial.PARITY_NONE,				#  paridad
+          stopbits=serial.STOPBITS_ONE,			#  bits de parada
+          bytesize=serial.EIGHTBITS,				#	tamaño de los bytes	
+          timeout=0.1												#  tiempo de espera										
+        )
+        self.serial_connections.append(comm) 	#	añadir la conexión
+        self.ports.append(port)								# añadir el puerto
+        print(f"Puerto {port} abierto exitosamente.")
+      except Exception as e:					# si no se puede abrir el puerto
+        print(f"No se pudo abrir el puerto {port}: {e}")
+    self.buffers = [bytearray() for _ in self.ports]
 
-	def close_serial_ports(self):
-		"""Cierra todas las conexiones serial."""
-		for comm in self.serial_connections:		# para cada conexión
-			comm.close()													# cerrar la conexión
-			print(f"Puerto {comm.port} cerrado exitosamente.")
+  def close_serial_ports(self):
+    """Cierra todas las conexiones serial."""
+    for comm in self.serial_connections:		# para cada conexión
+      comm.close()													# cerrar la conexión
+      print(f"Puerto {comm.port} cerrado exitosamente.")
 
-	def decode_serial_message(self, message):
-		"""Decodifica el mensaje binario recibido."""
-		value = struct.unpack(self.bin_msm_format, message)	# decodificar el mensaje
-		return list(value[:10]), int(value[12])	# retornar los valores y el cuerpo
+  def decode_serial_message(self, message):
+    """Decodifica el mensaje binario recibido."""
+    value = struct.unpack(self.bin_msm_format, message)	# decodificar el mensaje
+    return list(value[:10]), int(value[12])	# retornar los valores y el cuerpo
 
-	def read_port_data(self, i):
-		"""
-		Lee datos del puerto i y busca el delimitador b';****' 
-		para extraer un mensaje completo.
-		"""
-		comm = self.serial_connections[i]										# conexión serial
-		data = comm.read(comm.in_waiting or self.msm_size)	# leer los datos
-		self.buffers[i].extend(data)												# añadir los datos al buffer
-		end = self.buffers[i].find(b";****")							# buscar el delimitador				
-		values, body = None, None													# valores y cuerpo
-		if end >= 0:																			# si se encuentra el delimitador
-			message = self.buffers[i][:end]									# extraer el mensaje
-			# Actualizamos el buffer eliminando el mensaje leído y el delimitador
-			self.buffers[i] = self.buffers[i][end + len(b";****"):]	# actualizar el buffer
-			if len(message) == self.msm_size - len(b";****"):	# si el mensaje tiene el tamaño correcto
-				# decodificar el mensaje y retornar  los valores y el cuerpo
-				return self.decode_serial_message(message)		
-		return values, body	  # retornar los valores y el cuerpo como None
+  def read_port_data(self, i):
+    """
+    Lee datos del puerto i y busca el delimitador b';****' 
+    para extraer un mensaje completo.
+    """
+    comm = self.serial_connections[i]										# conexión serial
+    data = comm.read(comm.in_waiting or self.msm_size)	# leer los datos
+    self.buffers[i].extend(data)												# añadir los datos al buffer
+    end = self.buffers[i].find(b";****")							# buscar el delimitador				
+    values, body = None, None													# valores y cuerpo
+    if end >= 0:																			# si se encuentra el delimitador
+      message = self.buffers[i][:end]									# extraer el mensaje
+      # Actualizamos el buffer eliminando el mensaje leído y el delimitador
+      self.buffers[i] = self.buffers[i][end + len(b";****"):]	# actualizar el buffer
+      if len(message) == self.msm_size - len(b";****"):	# si el mensaje tiene el tamaño correcto
+        # decodificar el mensaje y retornar  los valores y el cuerpo
+        return self.decode_serial_message(message)		
+    return values, body	  # retornar los valores y el cuerpo como None
 
-	def identify_comm_mfl(self):
-		"""
-		Identifica qué puerto corresponde a cada cuerpo leyendo mensajes 
-		hasta obtener 3 identificaciones.Se espera que cada mensaje incluya en 
-		el campo 'body' la identificación del cuerpo.
-		"""
-		port_to_body = {}					# diccionario de puerto a cuerpo
-		max_attempts = 50					# número máximo de intentos
-		self.open_serial_ports()	# abrir los puertos	
+  def identify_comm_mfl(self):
+    """
+    Identifica qué puerto corresponde a cada cuerpo leyendo mensajes 
+    hasta obtener 3 identificaciones.Se espera que cada mensaje incluya en 
+    el campo 'body' la identificación del cuerpo.
+    """
+    port_to_body = {}					# diccionario de puerto a cuerpo
+    max_attempts = 50					# número máximo de intentos
+    self.open_serial_ports()	# abrir los puertos	
 
-		while len(port_to_body) < 3:	# mientras no se identifiquen los 3 cuerpos
-			for i in range(len(self.ports)):	# para cada puerto
-				port = self.ports[i]						# puerto
-				comm = self.serial_connections[i] # conexión
-				# Si el puerto ya fue asignado, se omite
-				if port in port_to_body.values(): 	# si el puerto ya fue asignado	
-					continue													# continuar
-				if len(port_to_body) >= 3:	# si ya se identificaron los 3 cuerpos
-					break															# salir										
-				attempts = 0								# intentos
-				while attempts < max_attempts:    # mientras no se alcance el número máximo de intentos
-					_ , body = self.read_port_data(i) # leer los datos del puerto
-					if body is not None:					# si se identifica el cuerpo
-						port_to_body[body] = port				# añadir el puerto al diccionario
-						print(f"El puerto {port} corresponde al cuerpo {body + 1}")
-						comm.close()										# cerrar la conexión
-						break														# salir									
-					attempts += 1									# incrementar los intentos
-					if attempts == max_attempts and port not in port_to_body.values():
-						print("No se pudo identificar un cuerpo para el puerto" + \
-							f"{port} después de {max_attempts} intentos.")
-			# Ordenamos los puertos según la identificación de cada cuerpo
-			self.ports = [port_to_body[i] for i in sorted(port_to_body.keys())]
-			print(f"Los puertos identificados en orden son {self.ports}")
+    while len(port_to_body) < 3:	# mientras no se identifiquen los 3 cuerpos
+      for i in range(len(self.ports)):	# para cada puerto
+        port = self.ports[i]						# puerto
+        comm = self.serial_connections[i] # conexión
+        # Si el puerto ya fue asignado, se omite
+        if port in port_to_body.values(): 	# si el puerto ya fue asignado	
+          continue													# continuar
+        if len(port_to_body) >= 3:	# si ya se identificaron los 3 cuerpos
+          break															# salir										
+        attempts = 0								# intentos
+        while attempts < max_attempts:    # mientras no se alcance el número máximo de intentos
+          _ , body = self.read_port_data(i) # leer los datos del puerto
+          if body is not None:					# si se identifica el cuerpo
+            port_to_body[body] = port				# añadir el puerto al diccionario
+            print(f"El puerto {port} corresponde al cuerpo {body + 1}")
+            comm.close()										# cerrar la conexión
+            break														# salir									
+          attempts += 1									# incrementar los intentos
+          if attempts == max_attempts and port not in port_to_body.values():
+            print("No se pudo identificar un cuerpo para el puerto" + \
+              f"{port} después de {max_attempts} intentos.")
+      # Ordenamos los puertos según la identificación de cada cuerpo
+      self.ports = [port_to_body[i] for i in sorted(port_to_body.keys())]
+      print(f"Los puertos identificados en orden son {self.ports}")
 
-	def publish_data_loop(self):
-		"""
-		Lee continuamente de los puertos, acumula datos y, cuando se tiene 
-		suficiente, publica los datos en las colas para el guardado y el plot.
-		"""
-		# Informar que la adqiuisición está activa
-		if self.acquisition_active is not None:
-			self.acquisition_active.value = True
+  def simulate_data_acquisition(self):
+    """
+    Simula la adquisición de datos generando valores aleatorios para 3 cuerpos.
+    """
+    # Informar que la adquisición está activa
+    if self.acquisition_active is not None:
+      self.acquisition_active.value = True
 
-		n_ports = len(self.ports)				# número de puertos
-		buffer_acquisition = {i: [] for i in range(n_ports)}	# buffer de adquisición
-		buffer_plot = {i: [] for i in range(n_ports)}			# buffer de plot
-		buffer_process = {i: [] for i in range(n_ports)}	# buffer de procesamiento
-		
-		#	Variables para el control de la publicación de datos
-		n_it = 0												# número de iteraciones
-		start_time_loop = time.time()		# tiempo de inicio del bucle
+    n_bodies = 3  # Número de cuerpos simulados
+    buffer_acquisition = {i: [] for i in range(n_bodies)}
+    buffer_plot = {i: [] for i in range(n_bodies)}
+    buffer_process = {i: [] for i in range(n_bodies)}
+    
+    # Variables para el control de la publicación de datos
+    n_it = 0
+    start_time_loop = time.time()
+    self.total_iter = 0
 
-		# Reabrir los puertos para la adquisición
-		self.open_serial_ports()				# abrir los puertos
-		self.total_iter = 0						# total de datos
-		# Bucle principal de adquisición de datos
-		while not self.stop_event.is_set():	# mientras no se reciba la señal de paro
-			for i in range(n_ports):				# para cada puerto
-				values, body = self.read_port_data(i)  # Leer datos de cada puerto
-				if body is not None:					# si se identifica el cuerpo
-					filtered_values = list(self.filters[body].apply(values) ) # Filtrar los datos
-					scaled_values = convert(filtered_values)	# convertir los valore
+    print("Iniciando simulación de datos...")
 
-					self.total_iter += 1						# incrementar el total de datos
-					if self.total_iter>100:				# si se tienen más de 1000 datos
-						# llenar las colas de datos paralelas
-						buffer_acquisition[body].append(values)	# añadir los valores al buffer de adquisición
-						if self.enable_plot.is_set():					# si se activa el plot
-							buffer_plot[body].append(scaled_values)		# añadir los valores escalados al plot
-						if self.enable_process.is_set():			# si se activa el procesamiento
-							buffer_process[body].append(filtered_values)	# añadir los valores al buffer de procesamiento
+    # Bucle principal de simulación de datos
+    while not self.stop_event.is_set():
+      for body in range(n_bodies):
+        # Generar 10 valores aleatorios por sensor (simulando los 10 sensores)
+        # Valores entre 2048 y 4096 (rango típico para los datos reales)
+        if body == 0:
+          values = np.random.randint(2100, 2800, 10).tolist()
+        elif body == 1:
+          values = np.random.randint(2100, 3000, 10).tolist()
+        else:
+          values = np.random.randint(2600, 3300, 10).tolist()
 
-			self.queue_plot, buffer_plot, _ =  buffer_management( # manejar el buffer de plot 
-				buffer_plot, self.enable_plot, self.queue_plot, 15)	#  con 10 datos
+        # Aplicar filtro a los datos simulados
+        filtered_values = list(self.filters[body].apply(values))
+        
+        # Convertir los valores filtrados
+        scaled_values = convert(filtered_values)
 
-			self.queue_process, buffer_process, _ =  buffer_management(		# manejar el buffer de procesamiento
-				buffer_process, self.enable_process, self.queue_process, 1)	# con 1 dato
+        self.total_iter += 1
+        if self.total_iter > 100:  # Comenzar a llenar buffers después de 100 iteraciones
+          buffer_acquisition[body].append(values)
+          if self.enable_plot.is_set():
+            buffer_plot[body].append(scaled_values)
+          if self.enable_process.is_set():
+            buffer_process[body].append(filtered_values)
 
-			self.queue_save, buffer_acquisition, n_it =  buffer_management( # manejar el buffer de adquisición
-				buffer_acquisition, self.enable_save, self.queue_save, 300,   # con 300 datos
-				True,   #True,  # seleccione si imprime o no. 
-				n_it, start_time_loop)																	# imprimir los datos
+      # Gestión de buffers (igual que en datos reales)
+      self.queue_plot, buffer_plot, _ = buffer_management(
+        buffer_plot, self.enable_plot, self.queue_plot, 15)
 
-			time.sleep(0.002)													# esperar 1 ms
-		else:	# si se recibe la señal de paro
-			# Informar que la adquisición está inactiva
-			if self.acquisition_active is not None:
-				self.acquisition_active.value = False
-		self.close_serial_ports()										# cerrar los puertos
+      self.queue_process, buffer_process, _ = buffer_management(
+        buffer_process, self.enable_process, self.queue_process, 1)
 
-	def run(self):
-		"""
-		Método principal del proceso: primero identifica los puertos asociados a cada cuerpo y luego
-		inicia el bucle de publicación de datos.
-		"""
-		self.identify_comm_mfl()									# identificar los puertos
-		self.publish_data_loop()									# publicar los datos
+      self.queue_save, buffer_acquisition, n_it = buffer_management(
+        buffer_acquisition, self.enable_save, self.queue_save, 300,
+        True, n_it, start_time_loop)
+
+      # Simular la velocidad de adquisición real
+      time.sleep(1/300)  # 10ms de delay para simular la velocidad de datos
+
+    # Informar que la adquisición está inactiva
+    if self.acquisition_active is not None:
+      self.acquisition_active.value = False
+
+  def publish_data_loop(self):
+    """
+    Lee continuamente de los puertos, acumula datos y, cuando se tiene 
+    suficiente, publica los datos en las colas para el guardado y el plot.
+    """
+    # Informar que la adqiuisición está activa
+    if self.acquisition_active is not None:
+      self.acquisition_active.value = True
+
+    n_ports = len(self.ports)				# número de puertos
+    buffer_acquisition = {i: [] for i in range(n_ports)}	# buffer de adquisición
+    buffer_plot = {i: [] for i in range(n_ports)}			# buffer de plot
+    buffer_process = {i: [] for i in range(n_ports)}	# buffer de procesamiento
+    
+    #	Variables para el control de la publicación de datos
+    n_it = 0												# número de iteraciones
+    start_time_loop = time.time()		# tiempo de inicio del bucle
+
+    # Reabrir los puertos para la adquisición
+    self.open_serial_ports()				# abrir los puertos
+    self.total_iter = 0						# total de datos
+    # Bucle principal de adquisición de datos
+    while not self.stop_event.is_set():	# mientras no se reciba la señal de paro
+      for i in range(n_ports):				# para cada puerto
+        values, body = self.read_port_data(i)  # Leer datos de cada puerto
+        if body is not None:					# si se identifica el cuerpo
+          filtered_values = list(self.filters[body].apply(values) ) # Filtrar los datos
+          scaled_values = convert(filtered_values)	# convertir los valore
+
+          self.total_iter += 1						# incrementar el total de datos
+          if self.total_iter>100:				# si se tienen más de 1000 datos
+            # llenar las colas de datos paralelas
+            buffer_acquisition[body].append(values)	# añadir los valores al buffer de adquisición
+            if self.enable_plot.is_set():					# si se activa el plot
+              buffer_plot[body].append(scaled_values)		# añadir los valores escalados al plot
+            if self.enable_process.is_set():			# si se activa el procesamiento
+              buffer_process[body].append(filtered_values)	# añadir los valores al buffer de procesamiento
+
+      self.queue_plot, buffer_plot, _ =  buffer_management( # manejar el buffer de plot 
+        buffer_plot, self.enable_plot, self.queue_plot, 15)	#  con 10 datos
+
+      self.queue_process, buffer_process, _ =  buffer_management(		# manejar el buffer de procesamiento
+        buffer_process, self.enable_process, self.queue_process, 1)	# con 1 dato
+
+      self.queue_save, buffer_acquisition, n_it =  buffer_management( # manejar el buffer de adquisición
+        buffer_acquisition, self.enable_save, self.queue_save, 300,   # con 300 datos
+        True,   #True,  # seleccione si imprime o no. 
+        n_it, start_time_loop)																	# imprimir los datos
+
+      time.sleep(0.002)													# esperar 1 ms
+    else:	# si se recibe la señal de paro
+      # Informar que la adquisición está inactiva
+      if self.acquisition_active is not None:
+        self.acquisition_active.value = False
+    self.close_serial_ports()										# cerrar los puertos
+
+  def run(self):
+    """
+    Método principal del proceso: primero identifica los puertos asociados a cada cuerpo y luego
+    inicia el bucle de publicación de datos.
+    """
+    if self.real_data:
+      self.identify_comm_mfl()									# identificar los puertos
+      self.publish_data_loop()									# publicar los datos
+    else:
+      print("Simulando datos de adquisición...")
+      self.simulate_data_acquisition()
 
 #%% ===========================================================================
 # Proceso de Guardado de Datos en CSV

@@ -99,6 +99,8 @@ def ScanA_update(fig, ax, y_min, y_max, t_max, data, sampling_rate, auto_scale):
     ax[2-i].set_xlim([0, t.max()])
     if auto_scale==1:
       ax[2-i].set_ylim([data.min(), data.max()])
+    elif auto_scale==2:
+      ax[2-i].set_ylim([data_plot.min(), data_plot.max()])
     else:
       ax[2-i].set_ylim([y_min, y_max])
   ax[0].legend(labels[::-1], loc='upper right', bbox_to_anchor=(1.19, 0.5),  ncol=1)
