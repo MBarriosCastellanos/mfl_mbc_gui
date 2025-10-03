@@ -5,6 +5,7 @@ import tkinter as tk        # Importar librería para crear la interfaz
 from interface import MainInterFace  # Importar la clase MainInterFace
 from interface import on_closing     # Importar función para cerrar la aplicación
 import multiprocessing        # Importar librería para procesos paralelos
+#daniel
 
 #%% ========================================================================
 # Iniciar la aplicación
